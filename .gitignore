@@ -1,0 +1,5 @@
+wf-pan-admin/dist
+wf-pan-admin/node_modules
+wf-pan-server/target
+wf-pan-server/.idea
+wf-pan-server/src/main/resources/static
