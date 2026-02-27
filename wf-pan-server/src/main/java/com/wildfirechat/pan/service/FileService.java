@@ -1,6 +1,7 @@
 package com.wildfirechat.pan.service;
 
 import com.wildfirechat.pan.constant.FileType;
+import com.wildfirechat.pan.config.OssConfig;
 import com.wildfirechat.pan.dto.request.CreateFileRequest;
 import com.wildfirechat.pan.dto.request.CreateFolderRequest;
 import com.wildfirechat.pan.dto.request.CopyRequest;
@@ -122,6 +123,12 @@ public class FileService {
         // 检查同名文件是否存在
         checkDuplicateName(request.getSpaceId(), request.getParentId(), request.getName());
         
+        // 处理OSS文件复制（如果copy参数为true且有storageUrl）
+        String targetStorageUrl = request.getStorageUrl();
+        if (Boolean.TRUE.equals(request.getCopy()) && request.getStorageUrl() != null && !request.getStorageUrl().isEmpty()) {
+            targetStorageUrl = storageService.copyObjectIfNeeded(request.getStorageUrl());
+        }
+        
         PanFile file = new PanFile();
         file.setSpaceId(request.getSpaceId());
         file.setParentId(request.getParentId());
@@ -130,7 +137,7 @@ public class FileService {
         file.setSize(request.getSize());
         file.setMimeType(request.getMimeType());
         file.setMd5(request.getMd5());
-        file.setStorageUrl(request.getStorageUrl());
+        file.setStorageUrl(targetStorageUrl);
         file.setCreatorId(userId);
         file.setCreatorName(username);
         
@@ -151,6 +158,7 @@ public class FileService {
         details.put("fileSize", request.getSize());
         details.put("spaceId", request.getSpaceId());
         details.put("parentId", request.getParentId());
+        details.put("ossCopy", Boolean.TRUE.equals(request.getCopy()));
         operationLogService.log(userId, OperationLogService.OP_UPLOAD_FILE, 
             OperationLogService.TARGET_FILE, saved.getId(), request.getSpaceId(), details);
         
@@ -160,6 +168,11 @@ public class FileService {
     /**
      * 删除文件或文件夹
      * 规则：文件夹非空不能删除
+     * 
+     * 删除逻辑：
+     * 1. 先软删除数据库记录
+     * 2. 检查是否还有其他文件引用相同的storageUrl
+     * 3. 如果没有其他引用，再删除OSS对象
      */
     @Transactional
     public void deleteFile(Long fileId, String userId) {
@@ -181,13 +194,14 @@ public class FileService {
             // 更新空间文件夹数
             spaceQuotaService.decrementFolderCount(file.getSpaceId());
         } else {
-            // 删除对象存储文件
-            storageService.deleteObject(file.getStorageUrl());
-            
             // 更新空间配额和文件数
             spaceQuotaService.decreaseUsedQuota(file.getSpaceId(), file.getSize());
             spaceQuotaService.decrementFileCount(file.getSpaceId());
         }
+        
+        // 保存storageUrl用于后续检查
+        String storageUrl = file.getStorageUrl();
+        boolean isFile = file.getType() == FileType.FILE;
         
         // 软删除
         file.setIsDeleted(true);
@@ -198,6 +212,17 @@ public class FileService {
         // 更新父文件夹的子文件数
         if (file.getParentId() != null) {
             fileRepository.decrementChildCount(file.getParentId());
+        }
+        
+        // 如果是文件，检查是否还有其他文件引用相同的storageUrl，如果没有则删除OSS对象
+        if (isFile && storageUrl != null && !storageUrl.isEmpty()) {
+            long refCount = fileRepository.countByStorageUrlAndIsDeletedFalse(storageUrl);
+            if (refCount == 0) {
+                storageService.deleteObject(storageUrl);
+                log.info("OSS对象已删除，无其他文件引用: {}", storageUrl);
+            } else {
+                log.info("保留OSS对象，仍有 {} 个文件引用: {}", refCount, storageUrl);
+            }
         }
         
         // 记录操作日志
@@ -334,6 +359,11 @@ public class FileService {
     
     /**
      * 复制文件/文件夹
+     * 
+     * @param request 复制请求
+     * @param userId 用户ID
+     * @param userName 用户名
+     * @return 复制后的文件VO
      */
     @Transactional
     public FileVO copyFile(CopyRequest request, String userId, String userName) {
@@ -362,6 +392,12 @@ public class FileService {
             }
         }
         
+        // 处理OSS文件复制（如果copy参数为true且是文件类型）
+        String targetStorageUrl = sourceFile.getStorageUrl();
+        if (Boolean.TRUE.equals(request.getCopy()) && sourceFile.getType() == FileType.FILE) {
+            targetStorageUrl = copyFileToOss(sourceFile);
+        }
+        
         // 创建新文件记录（复制）
         PanFile newFile = new PanFile();
         newFile.setSpaceId(request.getTargetSpaceId());
@@ -371,7 +407,7 @@ public class FileService {
         newFile.setSize(sourceFile.getSize());
         newFile.setMimeType(sourceFile.getMimeType());
         newFile.setMd5(sourceFile.getMd5());
-        newFile.setStorageUrl(sourceFile.getStorageUrl());
+        newFile.setStorageUrl(targetStorageUrl);
         newFile.setChildCount(0); // 子文件数初始为0，如果是文件夹会在递归复制中更新
         newFile.setCreatorId(userId);
         newFile.setCreatorName(userName);
@@ -383,7 +419,7 @@ public class FileService {
         
         // 如果是文件夹，递归复制子文件
         if (sourceFile.getType() == FileType.FOLDER) {
-            copyChildren(sourceFile.getId(), saved.getId(), request.getTargetSpaceId(), userId, userName);
+            copyChildren(sourceFile.getId(), saved.getId(), request.getTargetSpaceId(), userId, userName, request.getCopy());
             // 更新子文件数
             long childCount = fileRepository.countByParentIdAndIsDeletedFalse(saved.getId());
             saved.setChildCount((int) childCount);
@@ -408,6 +444,7 @@ public class FileService {
         details.put("sourceSpaceId", sourceFile.getSpaceId());
         details.put("targetSpaceId", request.getTargetSpaceId());
         details.put("targetParentId", request.getTargetParentId());
+        details.put("ossCopy", Boolean.TRUE.equals(request.getCopy()));
         operationLogService.log(userId, OperationLogService.OP_COPY_FILE, 
             sourceFile.getType() == FileType.FOLDER ? OperationLogService.TARGET_FOLDER : OperationLogService.TARGET_FILE, 
             saved.getId(), request.getTargetSpaceId(), details);
@@ -417,11 +454,19 @@ public class FileService {
     
     /**
      * 递归复制子文件/文件夹
+     * 
+     * @param copy 是否进行OSS复制，true表示跨空间复制时需要复制物理文件
      */
-    private void copyChildren(Long sourceParentId, Long targetParentId, Long targetSpaceId, String userId, String userName) {
+    private void copyChildren(Long sourceParentId, Long targetParentId, Long targetSpaceId, String userId, String userName, Boolean copy) {
         List<PanFile> children = fileRepository.findByParentIdAndIsDeletedFalse(sourceParentId);
         
         for (PanFile child : children) {
+            // 处理OSS文件复制（如果copy参数为true且是文件类型）
+            String targetStorageUrl = child.getStorageUrl();
+            if (Boolean.TRUE.equals(copy) && child.getType() == FileType.FILE) {
+                targetStorageUrl = copyFileToOss(child);
+            }
+            
             // 创建新的子文件记录
             PanFile newChild = new PanFile();
             newChild.setSpaceId(targetSpaceId);
@@ -431,7 +476,7 @@ public class FileService {
             newChild.setSize(child.getSize());
             newChild.setMimeType(child.getMimeType());
             newChild.setMd5(child.getMd5());
-            newChild.setStorageUrl(child.getStorageUrl());
+            newChild.setStorageUrl(targetStorageUrl);
             newChild.setChildCount(0);
             newChild.setCreatorId(userId);
             newChild.setCreatorName(userName);
@@ -443,7 +488,7 @@ public class FileService {
             
             // 如果是文件夹，递归复制其子文件
             if (child.getType() == FileType.FOLDER) {
-                copyChildren(child.getId(), savedChild.getId(), targetSpaceId, userId, userName);
+                copyChildren(child.getId(), savedChild.getId(), targetSpaceId, userId, userName, copy);
                 // 更新子文件数
                 long childCount = fileRepository.countByParentIdAndIsDeletedFalse(savedChild.getId());
                 savedChild.setChildCount((int) childCount);
@@ -455,6 +500,27 @@ public class FileService {
                 spaceQuotaService.decreaseUsedQuota(targetSpaceId, -child.getSize());
                 spaceQuotaService.incrementFileCount(targetSpaceId);
             }
+        }
+    }
+    
+    /**
+     * 复制文件到OSS（如果配置了OSS）
+     * 
+     * @param sourceFile 源文件
+     * @return 目标存储URL
+     */
+    private String copyFileToOss(PanFile sourceFile) {
+        if (sourceFile.getStorageUrl() == null || sourceFile.getStorageUrl().isEmpty()) {
+            return sourceFile.getStorageUrl();
+        }
+        
+        try {
+            // 使用StorageService复制文件到OSS
+            return storageService.copyObjectIfNeeded(sourceFile.getStorageUrl());
+        } catch (Exception e) {
+            log.error("复制文件到OSS失败: {}", sourceFile.getStorageUrl(), e);
+            // 如果OSS复制失败，返回原URL，继续用原来的存储
+            return sourceFile.getStorageUrl();
         }
     }
     

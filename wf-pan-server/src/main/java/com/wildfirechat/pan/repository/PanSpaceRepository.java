@@ -25,7 +25,4 @@ public interface PanSpaceRepository extends JpaRepository<PanSpace, Long> {
            "(s.ownerId = :userId) " +
            "ORDER BY s.createdAt DESC")
     List<PanSpace> findAccessibleSpaces(@Param("userId") String userId);
-    
-    @Query("SELECT s FROM PanSpace s WHERE s.spaceType = 'DEPT_PUBLIC' OR s.spaceType = 'DEPT_PRIVATE'")
-    List<PanSpace> findAllDeptSpaces();
 }

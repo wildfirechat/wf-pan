@@ -56,13 +56,32 @@ im:
 
 ### 3. 配置对象存储（可选）
 
-```yaml
-storage:
-  provider: minio  # none | minio | s3
-  endpoint: http://localhost:9000
-  access-key: minioadmin
-  secret-key: minioadmin
+支持多厂商对象存储：
+
+```properties
+# 媒体存储配置
+# 1: 七牛云存储, 2: 阿里云对象存储, 3: 野火私有对象存储, 4: 对象存储网关
+# 5: 腾讯云存储, 6: 华为云存储, 7: AWS S3, 8: 京东云存储
+media.type=4
+media.server_url=http://localhost:9000
+media.access_key=minioadmin
+media.secret_key=minioadmin
+media.bucket=wf-pan
 ```
+
+**厂商配置示例：**
+
+| 类型 | 配置示例 |
+|------|----------|
+| 0 - 未配置 | 不使用对象存储，文件仅保存URL |
+| 1 - 七牛云 | `media.server_url=http://your-domain.qiniudn.com` |
+| 2 - 阿里云 | `media.aliyun.endpoint=oss-cn-hangzhou.aliyuncs.com` |
+| 3 - 野火私有 | MinIO兼容，配置`media.server_url`即可 |
+| 4 - 对象存储网关 | MinIO兼容，配置`media.server_url`即可 |
+| 5 - 腾讯云 | `media.tencent.region=ap-guangzhou` |
+| 6 - 华为云 | `media.huawei.endpoint=obs.cn-north-4.myhuaweicloud.com` |
+| 7 - AWS S3 | `media.aws.region=us-east-1` |
+| 8 - 京东云 | `media.jdcloud.endpoint=s3.cn-north-1.jdcloud-oss.com` |
 
 ### 4. 构建项目
 
@@ -106,15 +125,18 @@ java -jar target/wf-pan-server-1.0.0.jar
 ### 文件管理
 
 - 文件夹非空不能删除
-- 删除文件时同步删除对象存储
+- 删除文件时，检查是否还有其他文件引用相同存储URL，无引用时才删除OSS对象
+- 支持文件跨空间复制（可配置是否复制物理文件）
 - 完整的配额统计
 
 ## API 端口
 
 | 端口 | 用途 | 认证方式 | 访问地址 |
 |------|------|---------|---------|
-| 8080 | 管理端口 | Cookie/Session | http://localhost:8080/admin/ |
+| 8080 | 管理端口 | Cookie/Session | http://localhost:8080/ |
 | 8081 | 客户端端口 | Header authCode | http://localhost:8081/api/v1/ |
+
+**注意**：管理后台前端部署在根路径 `/`，不是 `/admin/`
 
 ## 技术栈
 
@@ -124,7 +146,13 @@ java -jar target/wf-pan-server-1.0.0.jar
 - Spring Data JPA
 - MySQL 8.0
 - Spring Security Crypto
-- MinIO Client
+- MinIO Client (野火私有/网关)
+- 七牛云 SDK
+- 阿里云 OSS SDK
+- 腾讯云 COS SDK
+- 华为云 OBS SDK
+- AWS S3 SDK
+- 京东云 OSS SDK
 
 **前端**
 - Vue 3

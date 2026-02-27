@@ -82,4 +82,9 @@ public interface PanFileRepository extends JpaRepository<PanFile, Long> {
      */
     @Query("SELECT COUNT(f) FROM PanFile f WHERE f.isDeleted = false AND f.createdAt >= :today")
     long countTodayUploads(@Param("today") LocalDateTime today);
+    
+    /**
+     * 统计使用相同storageUrl的未删除文件数量（用于判断是否可删除OSS对象）
+     */
+    long countByStorageUrlAndIsDeletedFalse(String storageUrl);
 }

@@ -47,7 +47,7 @@ const copyToServerPlugin = () => ({
     
     copyDir(sourceDir, targetDir)
     console.log(`✅ Frontend assets copied to: ${targetDir}`)
-    console.log(`📦 Access admin panel at: http://localhost:8080/admin/`)
+    console.log(`📦 Access admin panel at: http://localhost:8080/`)
   }
 })
 

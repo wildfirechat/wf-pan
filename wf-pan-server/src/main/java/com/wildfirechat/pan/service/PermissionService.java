@@ -10,9 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
-import java.util.List;
-
 @Service
 @Slf4j
 public class PermissionService {
@@ -49,36 +46,6 @@ public class PermissionService {
     }
     
     /**
-     * 【预留】判断用户是否属于某个部门
-     * 暂返回false，后续实现时从IM服务或同步表查询
-     */
-    public boolean isUserInDept(String userId, String deptId) {
-        // TODO: 后续实现部门成员判断
-        // 方案1: 调用IM服务接口查询
-        // 方案2: 查询同步的pan_dept_member表
-        log.debug("[预留] 判断用户{}是否在部门{}中", userId, deptId);
-        return false;
-    }
-    
-    /**
-     * 【预留】获取用户所属的所有部门ID
-     */
-    public List<String> getUserDeptIds(String userId) {
-        // TODO: 后续实现
-        log.debug("[预留] 获取用户{}的部门列表", userId);
-        return Collections.emptyList();
-    }
-    
-    /**
-     * 【预留】判断用户是否是部门管理员
-     */
-    public boolean isDeptAdmin(String userId, String deptId) {
-        // TODO: 后续实现
-        log.debug("[预留] 判断用户{}是否是部门{}的管理员", userId, deptId);
-        return false;
-    }
-    
-    /**
      * 判断是否是全局管理员
      */
     public boolean isGlobalAdmin(String userId) {
@@ -105,11 +72,6 @@ public class PermissionService {
                 // 管理员根据配置决定是否可以访问
                 return canAdminAccessPrivateSpace(userId);
             
-            case DEPT_PUBLIC:
-            case DEPT_PRIVATE:
-                // 预留：部门成员可访问
-                return isUserInDept(userId, space.getOwnerId());
-            
             default:
                 return false;
         }
@@ -122,7 +84,7 @@ public class PermissionService {
         PanSpace space = spaceRepository.findById(spaceId).orElse(null);
         if (space == null) return false;
         
-        // 检查是否是空间管理员（部门空间）
+        // 检查是否是空间管理员
         boolean isSpaceAdmin = spaceAdminRepository.existsBySpaceIdAndUserId(spaceId, userId);
         if (isSpaceAdmin) return true;
         
@@ -140,11 +102,6 @@ public class PermissionService {
                 }
                 // 管理员根据配置决定是否可以管理
                 return canAdminAccessPrivateSpace(userId);
-            
-            case DEPT_PUBLIC:
-            case DEPT_PRIVATE:
-                // 预留：部门管理员可管理
-                return isDeptAdmin(userId, space.getOwnerId()) || isSpaceAdmin;
             
             default:
                 return false;

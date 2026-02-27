@@ -48,8 +48,6 @@ public class AdminSpaceController {
                     String spaceType = s.getSpaceType().name();
                     if ("USER".equals(filterType)) {
                         return spaceType.startsWith("USER_");
-                    } else if ("DEPT".equals(filterType)) {
-                        return spaceType.startsWith("DEPT_");
                     } else {
                         return spaceType.equals(filterType);
                     }
@@ -113,9 +111,6 @@ public class AdminSpaceController {
         switch (spaceType) {
             case GLOBAL_PUBLIC:
                 return OwnerType.SYSTEM;
-            case DEPT_PUBLIC:
-            case DEPT_PRIVATE:
-                return OwnerType.DEPT;
             case USER_PUBLIC:
             case USER_PRIVATE:
                 return OwnerType.USER;

@@ -6,7 +6,6 @@
         <el-radio-button label="">全部</el-radio-button>
         <el-radio-button label="GLOBAL_PUBLIC">全局空间</el-radio-button>
         <el-radio-button label="USER">用户空间</el-radio-button>
-        <el-radio-button label="DEPT">部门空间</el-radio-button>
       </el-radio-group>
     </div>
     
@@ -75,8 +74,6 @@ const total = ref(0)
 
 const spaceTypeMap = {
   'GLOBAL_PUBLIC': { text: '全局公共', tag: 'success' },
-  'DEPT_PUBLIC': { text: '部门公共', tag: 'primary' },
-  'DEPT_PRIVATE': { text: '部门私有', tag: 'warning' },
   'USER_PUBLIC': { text: '用户公共', tag: 'info' },
   'USER_PRIVATE': { text: '用户私有', tag: '' }
 }
@@ -112,11 +109,9 @@ const fetchSpaces = async () => {
       page: page.value - 1,
       size: size.value
     }
-    // USER 和 DEPT 是特殊过滤值，表示过滤用户相关或部门相关的所有空间类型
+    // USER 是特殊过滤值，表示过滤用户相关的所有空间类型
     if (filterType.value === 'USER') {
       params.type = 'USER'
-    } else if (filterType.value === 'DEPT') {
-      params.type = 'DEPT'
     } else if (filterType.value) {
       params.type = filterType.value
     }

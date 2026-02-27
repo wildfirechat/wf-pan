@@ -8,7 +8,12 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "pan_file")
+@Table(name = "pan_file", 
+    indexes = {
+        @Index(name = "idx_storage_url_deleted", columnList = "storage_url, is_deleted"),
+        @Index(name = "idx_space_parent", columnList = "space_id, parent_id, is_deleted"),
+        @Index(name = "idx_parent_id", columnList = "parent_id, is_deleted")
+    })
 @Data
 public class PanFile {
     
@@ -38,7 +43,7 @@ public class PanFile {
     @Column(length = 32)
     private String md5;
     
-    @Column(name = "storage_url", columnDefinition = "TEXT")
+    @Column(name = "storage_url", length = 760)
     private String storageUrl;
     
     @Column(name = "child_count")
