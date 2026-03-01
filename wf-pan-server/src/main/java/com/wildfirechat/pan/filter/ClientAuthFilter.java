@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -15,10 +16,13 @@ import java.io.IOException;
 @Component
 @Slf4j
 public class ClientAuthFilter implements Filter {
-    
+
     public static final String USER_ID_KEY = "userId";
     public static final String USER_NAME_KEY = "userName";
-    
+
+    @Value("${server.port:8081}")
+    private int port;
+
     @Autowired
     private ClientAuthService clientAuthService;
     
@@ -35,7 +39,7 @@ public class ClientAuthFilter implements Filter {
         int serverPort = request.getServerPort();
         
         // 只允许 8081 端口的请求进入客户端接口
-        if (serverPort != 8081) {
+        if (serverPort != port) {
             chain.doFilter(request, response);
             return;
         }

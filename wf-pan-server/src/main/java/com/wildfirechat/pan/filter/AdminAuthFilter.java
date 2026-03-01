@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,9 @@ import java.io.IOException;
 @Component
 @Slf4j
 public class AdminAuthFilter implements Filter {
-    
+    @Value("${server.admin-port:8080}")
+    private int admin_port;
+
     public static final String ADMIN_SESSION_KEY = "admin_user";
     
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -31,7 +34,7 @@ public class AdminAuthFilter implements Filter {
         int serverPort = request.getServerPort();
         
         // 只允许 8080 端口的请求进入管理接口
-        if (serverPort != 8080) {
+        if (serverPort != admin_port) {
             chain.doFilter(request, response);
             return;
         }
