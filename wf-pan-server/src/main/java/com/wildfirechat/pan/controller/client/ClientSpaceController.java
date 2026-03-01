@@ -52,6 +52,9 @@ public class ClientSpaceController {
     @PostMapping("/list")
     public Result<List<SpaceVO>> list(HttpServletRequest request) {
         String userId = (String) request.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         // 自动初始化用户空间
         UserSpacesVO userSpaces = userSpaceInitService.getOrInitUserSpaces(userId, userId);
@@ -73,6 +76,9 @@ public class ClientSpaceController {
     public Result<List<SpaceVO>> getMySpaces(@Valid @RequestBody GetMySpacesRequest request,
                                               HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         // 自动初始化用户空间
         userSpaceInitService.getOrInitUserSpaces(userId, userId);
@@ -100,6 +106,9 @@ public class ClientSpaceController {
     public Result<SpaceVO> getUserPublicSpace(@Valid @RequestBody GetUserPublicSpaceRequest request,
                                                HttpServletRequest httpRequest) {
         String currentUserId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (currentUserId == null || currentUserId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         Optional<PanSpace> publicSpace = spaceRepository.findBySpaceTypeAndOwnerId(SpaceType.USER_PUBLIC, request.getTargetUserId());
         
@@ -117,6 +126,9 @@ public class ClientSpaceController {
     public Result<List<FileVO>> getFiles(@Valid @RequestBody GetSpaceFilesRequest request,
                                           HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         Long parentId = request.getParentId() != null && request.getParentId() > 0 ? request.getParentId() : null;
         
         return Result.success(fileService.getFileList(request.getSpaceId(), parentId, userId));

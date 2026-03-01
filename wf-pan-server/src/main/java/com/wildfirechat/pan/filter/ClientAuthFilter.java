@@ -77,6 +77,13 @@ public class ClientAuthFilter implements Filter {
             return;
         }
         
+        // 检查 userId 是否为空
+        if (userId.isEmpty()) {
+            log.warn("AuthCode validated but userId is empty");
+            writeErrorResponse(httpResponse, 1003, "用户ID为空");
+            return;
+        }
+        
         // 将 userId 设置到 request attribute 中
         httpRequest.setAttribute(USER_ID_KEY, userId);
         // userName 暂时用 userId，后续可以从IM服务获取

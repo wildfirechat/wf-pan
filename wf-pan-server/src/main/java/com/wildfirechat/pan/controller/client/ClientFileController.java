@@ -36,6 +36,9 @@ public class ClientFileController {
     public Result<Boolean> checkUploadPermission(@Valid @RequestBody SpaceIdRequest request,
                                                   HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         boolean canManage = permissionService.canManageSpace(userId, request.getSpaceId());
         return Result.success(canManage);
     }
@@ -47,6 +50,9 @@ public class ClientFileController {
     public Result<FileVO> createFolder(@Valid @RequestBody CreateFolderRequest request,
                                         HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         String userName = (String) httpRequest.getAttribute(ClientAuthFilter.USER_NAME_KEY);
         
         return Result.success(fileService.createFolder(request, userId, userName));
@@ -59,6 +65,9 @@ public class ClientFileController {
     public Result<FileVO> createFile(@Valid @RequestBody CreateFileRequest request,
                                       HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         String userName = (String) httpRequest.getAttribute(ClientAuthFilter.USER_NAME_KEY);
         
         return Result.success(fileService.createFile(request, userId, userName));
@@ -71,6 +80,9 @@ public class ClientFileController {
     public Result<Void> delete(@Valid @RequestBody DeleteFileRequest request,
                                HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         fileService.deleteFile(request.getFileId(), userId);
         return Result.success();
@@ -83,6 +95,9 @@ public class ClientFileController {
     public Result<FileVO> rename(@Valid @RequestBody RenameRequest request,
                                   HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         return Result.success(fileService.renameFile(request, userId));
     }
@@ -94,6 +109,9 @@ public class ClientFileController {
     public Result<FileVO> move(@Valid @RequestBody MoveRequest request,
                                 HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         return Result.success(fileService.moveFile(request, userId));
     }
@@ -105,6 +123,9 @@ public class ClientFileController {
     public Result<FileVO> copy(@Valid @RequestBody CopyRequest request,
                                 HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         String userName = (String) httpRequest.getAttribute(ClientAuthFilter.USER_NAME_KEY);
         
         return Result.success(fileService.copyFile(request, userId, userName));
@@ -117,6 +138,9 @@ public class ClientFileController {
     public Result<FileUrlResponse> getDownloadUrl(@Valid @RequestBody GetFileUrlRequest request,
                                                    HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         FileVO file = fileService.getFileDetail(request.getFileId(), userId);
         

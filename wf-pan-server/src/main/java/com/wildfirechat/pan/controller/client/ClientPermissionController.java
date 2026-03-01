@@ -31,6 +31,9 @@ public class ClientPermissionController {
     public Result<Boolean> checkSpaceWritePermission(@PathVariable Long spaceId,
                                                       HttpServletRequest request) {
         String userId = (String) request.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
         
         PanSpace space = spaceRepository.findById(spaceId).orElse(null);
         if (space == null) {
