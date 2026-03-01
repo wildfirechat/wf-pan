@@ -1,10 +1,8 @@
 package com.wildfirechat.pan.config;
 
-import io.minio.MinioClient;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -93,36 +91,6 @@ public class OssConfig {
      */
     public boolean isMinioCompatible() {
         return mediaType == TYPE_WILDFIRE || mediaType == TYPE_GATEWAY;
-    }
-
-    /**
-     * 创建MinIO客户端（用于野火私有和对象存储网关）
-     */
-    @Bean(destroyMethod = "close")
-    public MinioClient minioClient() {
-        if (!isMinioCompatible()) {
-            log.debug("当前配置不是MinIO兼容类型({})，不创建MinioClient", getMediaTypeName());
-            return null;
-        }
-        
-        if (serverUrl == null || serverUrl.isEmpty() || 
-            accessKey == null || accessKey.isEmpty() || 
-            secretKey == null || secretKey.isEmpty()) {
-            log.warn("MinIO配置不完整，请检查 media.server_url, media.access_key, media.secret_key");
-            return null;
-        }
-
-        try {
-            MinioClient client = MinioClient.builder()
-                    .endpoint(serverUrl)
-                    .credentials(accessKey, secretKey)
-                    .build();
-            log.info("MinIO客户端创建成功: {}", serverUrl);
-            return client;
-        } catch (Exception e) {
-            log.error("MinIO客户端创建失败: {}", e.getMessage());
-            return null;
-        }
     }
 
     /**

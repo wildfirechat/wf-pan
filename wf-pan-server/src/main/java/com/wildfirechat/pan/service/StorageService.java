@@ -11,6 +11,7 @@ import com.qiniu.storage.BucketManager;
 import com.qiniu.storage.Configuration;
 import com.qiniu.util.Auth;
 import com.wildfirechat.pan.config.OssConfig;
+import com.wildfirechat.pan.exception.BusinessException;
 import io.minio.CopyObjectArgs;
 import io.minio.CopySource;
 import io.minio.MinioClient;
@@ -40,9 +41,6 @@ public class StorageService {
     @Autowired
     private OssConfig ossConfig;
 
-    @Autowired(required = false)
-    private MinioClient minioClient;
-
     // 缓存各厂商客户端实例
     private volatile OSS aliyunClient;
     private volatile COSClient tencentClient;
@@ -56,15 +54,15 @@ public class StorageService {
      *
      * @param sourceUrl 源文件URL
      * @return 复制后的URL（如果在Pan bucket中已存在或无需复制，返回原URL）
+     * @throws BusinessException 复制失败或不支持时抛出异常
      */
-    public String copyObjectIfNeeded(String sourceUrl) {
+    public String copyObjectIfNeeded(String sourceUrl) throws BusinessException {
         if (ossConfig.getMediaType() == OssConfig.TYPE_NONE) {
-            log.debug("Media type not configured, skip copy: {}", sourceUrl);
-            return sourceUrl;
+            throw new BusinessException("Media type not configured");
         }
 
         if (sourceUrl == null || sourceUrl.isEmpty()) {
-            return sourceUrl;
+            throw new BusinessException("Source URL is null or empty");
         }
 
         // 检查是否已经在Pan bucket中
@@ -73,34 +71,21 @@ public class StorageService {
             return sourceUrl;
         }
 
-        try {
-            // 生成目标key
-            String targetKey = generateTargetKey(sourceUrl);
+        // 生成目标key
+        String targetKey = generateTargetKey(sourceUrl);
 
-            // 根据provider类型执行复制
-            return switch (ossConfig.getMediaType()) {
-                case OssConfig.TYPE_QINIU -> copyUsingQiniu(sourceUrl, targetKey);
-                case OssConfig.TYPE_ALIYUN -> copyUsingAliyun(sourceUrl, targetKey);
-                case OssConfig.TYPE_WILDFIRE -> copyUsingMinio(sourceUrl, targetKey);
-                case OssConfig.TYPE_GATEWAY -> {
-                    // TODO: 对象存储网关复制功能待实现
-                    log.warn("对象存储网关复制功能暂未实现: {}", sourceUrl);
-                    yield sourceUrl;
-                }
-                case OssConfig.TYPE_TENCENT -> copyUsingTencent(sourceUrl, targetKey);
-                case OssConfig.TYPE_HUAWEI -> copyUsingHuawei(sourceUrl, targetKey);
-                case OssConfig.TYPE_AWS_S3 -> copyUsingAwsS3(sourceUrl, targetKey);
-                case OssConfig.TYPE_JDCLOUD -> copyUsingJdcloud(sourceUrl, targetKey);
-                default -> {
-                    log.warn("Unsupported media type: {}, skip copy", ossConfig.getMediaType());
-                    yield sourceUrl;
-                }
-            };
-        } catch (Exception e) {
-            log.error("Failed to copy object: {}", sourceUrl, e);
-            // 复制失败时返回原URL，避免影响业务
-            return sourceUrl;
-        }
+        // 根据provider类型执行复制
+        return switch (ossConfig.getMediaType()) {
+            case OssConfig.TYPE_QINIU -> copyUsingQiniu(sourceUrl, targetKey);
+            case OssConfig.TYPE_ALIYUN -> copyUsingAliyun(sourceUrl, targetKey);
+            case OssConfig.TYPE_WILDFIRE -> copyUsingMinio(sourceUrl, targetKey);
+            case OssConfig.TYPE_GATEWAY -> throw new BusinessException("Gateway storage copy not supported");
+            case OssConfig.TYPE_TENCENT -> copyUsingTencent(sourceUrl, targetKey);
+            case OssConfig.TYPE_HUAWEI -> copyUsingHuawei(sourceUrl, targetKey);
+            case OssConfig.TYPE_AWS_S3 -> copyUsingAwsS3(sourceUrl, targetKey);
+            case OssConfig.TYPE_JDCLOUD -> copyUsingJdcloud(sourceUrl, targetKey);
+            default -> throw new BusinessException("Unsupported media type: " + ossConfig.getMediaType());
+        };
     }
 
     /**
@@ -174,7 +159,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("Qiniu copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("Qiniu copy failed: " + e.getMessage(), e);
         }
     }
 
@@ -206,8 +191,7 @@ public class StorageService {
                 client.copyObject(copyRequest);
             } else {
                 // 跨bucket拷贝，先下载再上传
-                log.warn("Aliyun cross-bucket copy not implemented, source: {}", sourceUrl);
-                return sourceUrl;
+                throw new BusinessException("Aliyun cross-bucket copy not implemented");
             }
 
             log.info("Aliyun OSS copy success: {} -> {}/{}", sourceUrl, ossConfig.getBucket(), targetKey);
@@ -215,7 +199,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("Aliyun OSS copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("Aliyun OSS copy failed: " + e.getMessage(), e);
         } finally {
             if (client != null) {
                 client.shutdown();
@@ -227,15 +211,17 @@ public class StorageService {
      * 使用MinIO SDK复制文件（野火私有、对象存储网关）
      */
     private String copyUsingMinio(String sourceUrl, String targetKey) {
-        if (minioClient == null) {
-            log.warn("MinioClient not available, skip copy");
-            return sourceUrl;
-        }
-
+        MinioClient client = null;
         try {
+            // 创建客户端
+            client = MinioClient.builder()
+                    .endpoint(ossConfig.getServerUrl())
+                    .credentials(ossConfig.getAccessKey(), ossConfig.getSecretKey())
+                    .build();
+
             // 检查目标文件是否已存在
             try {
-                minioClient.statObject(
+                client.statObject(
                         StatObjectArgs.builder()
                                 .bucket(ossConfig.getBucket())
                                 .object(targetKey)
@@ -254,7 +240,7 @@ public class StorageService {
             SourceObject sourceObj = parseSourceUrl(sourceUrl);
 
             // 执行服务器端复制
-            minioClient.copyObject(
+            client.copyObject(
                     CopyObjectArgs.builder()
                             .bucket(ossConfig.getBucket())
                             .object(targetKey)
@@ -270,7 +256,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("MinIO copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("MinIO copy failed: " + e.getMessage(), e);
         }
     }
 
@@ -301,7 +287,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("Tencent COS copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("Tencent COS copy failed: " + e.getMessage(), e);
         } finally {
             if (client != null) {
                 client.shutdown();
@@ -335,13 +321,12 @@ public class StorageService {
                 log.info("Huawei OBS copy success: {} -> {}/{}", sourceUrl, ossConfig.getBucket(), targetKey);
                 return buildTargetUrl(targetKey);
             } else {
-                log.error("Huawei OBS copy failed: {}", sourceUrl);
-                return sourceUrl;
+                throw new BusinessException("Huawei OBS copy failed: no ETag returned");
             }
 
         } catch (Exception e) {
             log.error("Huawei OBS copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("Huawei OBS copy failed: " + e.getMessage(), e);
         }
     }
 
@@ -378,7 +363,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("AWS S3 copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("AWS S3 copy failed: " + e.getMessage(), e);
         } finally {
             if (client != null) {
                 client.close();
@@ -424,7 +409,7 @@ public class StorageService {
 
         } catch (Exception e) {
             log.error("JDCloud OSS copy failed: {}", sourceUrl, e);
-            return sourceUrl;
+            throw new BusinessException("JDCloud OSS copy failed: " + e.getMessage(), e);
         } finally {
             if (client != null) {
                 client.close();
@@ -544,11 +529,16 @@ public class StorageService {
      * 使用MinIO删除文件
      */
     private void deleteUsingMinio(String storageUrl) {
-        if (minioClient == null) return;
-        
+        MinioClient client = null;
         try {
+            // 创建客户端
+            client = MinioClient.builder()
+                    .endpoint(ossConfig.getServerUrl())
+                    .credentials(ossConfig.getAccessKey(), ossConfig.getSecretKey())
+                    .build();
+            
             SourceObject sourceObj = parseSourceUrl(storageUrl);
-            minioClient.removeObject(
+            client.removeObject(
                     RemoveObjectArgs.builder()
                             .bucket(sourceObj.bucket)
                             .object(sourceObj.key)
