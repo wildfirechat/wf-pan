@@ -20,8 +20,11 @@ public class ClientAuthFilter implements Filter {
     public static final String USER_ID_KEY = "userId";
     public static final String USER_NAME_KEY = "userName";
 
-    @Value("${server.port:8081}")
+    @Value("${server.port}")
     private int port;
+
+    @Value("${server.admin-port}")
+    private int adminPort;
 
     @Autowired
     private ClientAuthService clientAuthService;
@@ -36,15 +39,26 @@ public class ClientAuthFilter implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         
         // 获取请求端口
-        int serverPort = request.getServerPort();
+        int serverPort = request.getLocalPort();
+        String uri = httpRequest.getRequestURI();
         
-        // 只允许 8081 端口的请求进入客户端接口
+        // 严格端口隔离：客户端端口禁止访问管理接口
+        if (serverPort == port) {
+            if (isAdminApi(uri)) {
+                log.warn("Client port {} attempted to access admin API: {}", serverPort, uri);
+                writeErrorResponse(httpResponse, 403, "管理接口不允许从客户端端口访问");
+                return;
+            }
+        }
+        
+        log.debug("Request port {}, client port {}", serverPort, port);
+        
+        // 只允许客户端端口的请求进入客户端接口
         if (serverPort != port) {
             chain.doFilter(request, response);
             return;
         }
         
-        String uri = httpRequest.getRequestURI();
         log.debug("Client request: {}, port: {}", uri, serverPort);
         
         // 从 header 获取 authCode（参考 wf-poll-server 的 AuthFilter）
@@ -74,9 +88,25 @@ public class ClientAuthFilter implements Filter {
     }
     
     private void writeErrorResponse(HttpServletResponse response, int code, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        // 403 使用 FORBIDDEN，其他使用 UNAUTHORIZED
+        if (code == 403) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        } else {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        }
         response.setContentType("application/json;charset=UTF-8");
         Result<Void> result = Result.error(code, message);
         response.getWriter().write(objectMapper.writeValueAsString(result));
+    }
+    
+    /**
+     * 判断是否是管理接口
+     */
+    private boolean isAdminApi(String uri) {
+        // 管理API是 /api/* 但不是 /api/v1/*
+        if (uri.startsWith("/api/") && !uri.startsWith("/api/v1/")) {
+            return true;
+        }
+        return false;
     }
 }

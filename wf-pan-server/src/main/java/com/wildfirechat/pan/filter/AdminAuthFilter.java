@@ -31,15 +31,23 @@ public class AdminAuthFilter implements Filter {
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         
         // 获取请求端口
-        int serverPort = request.getServerPort();
+        int serverPort = request.getLocalPort();
+        String uri = httpRequest.getRequestURI();
         
-        // 只允许 8080 端口的请求进入管理接口
+        // 严格端口隔离：管理端口禁止访问客户端 API
+        if (serverPort == admin_port) {
+            if (isClientApi(uri)) {
+                log.warn("Admin port {} attempted to access client API: {}", serverPort, uri);
+                writeErrorResponse(httpResponse, 403, "客户端接口不允许从管理端口访问");
+                return;
+            }
+        }
+        
+        // 只允许管理端口的请求进入管理接口
         if (serverPort != admin_port) {
             chain.doFilter(request, response);
             return;
         }
-        
-        String uri = httpRequest.getRequestURI();
         
         // 登录相关接口放行
         if (uri.equals("/api/auth/login") || uri.equals("/api/auth/status")) {
@@ -76,5 +84,23 @@ public class AdminAuthFilter implements Filter {
         response.setContentType("application/json;charset=UTF-8");
         Result<Void> result = Result.error(401, message);
         response.getWriter().write(objectMapper.writeValueAsString(result));
+    }
+    
+    private void writeErrorResponse(HttpServletResponse response, int code, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json;charset=UTF-8");
+        Result<Void> result = Result.error(code, message);
+        response.getWriter().write(objectMapper.writeValueAsString(result));
+    }
+    
+    /**
+     * 判断是否是客户端 API
+     */
+    private boolean isClientApi(String uri) {
+        // 客户端 API 路径是 /api/v1/*
+        if (uri.startsWith("/api/v1/")) {
+            return true;
+        }
+        return false;
     }
 }
