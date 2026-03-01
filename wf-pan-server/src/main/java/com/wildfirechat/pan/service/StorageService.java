@@ -106,7 +106,7 @@ public class StorageService {
     private String generateTargetKey(String sourceUrl) {
         String fileName = extractFileName(sourceUrl);
         String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        return "pan/" + uuid + "-" + fileName;
+        return uuid + "-" + fileName;
     }
 
     /**
