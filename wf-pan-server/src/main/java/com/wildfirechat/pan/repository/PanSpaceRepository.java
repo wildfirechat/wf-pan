@@ -21,8 +21,8 @@ public interface PanSpaceRepository extends JpaRepository<PanSpace, Long> {
     
     @Query("SELECT s FROM PanSpace s WHERE " +
            "(s.spaceType = 'GLOBAL_PUBLIC') OR " +
-           "(s.spaceType = 'USER_PUBLIC') OR " +
            "(s.ownerId = :userId) " +
-           "ORDER BY s.createdAt DESC")
+           "ORDER BY CASE WHEN s.spaceType = 'GLOBAL_PUBLIC' THEN 0 ELSE 1 END, " +
+           "s.createdAt DESC")
     List<PanSpace> findAccessibleSpaces(@Param("userId") String userId);
 }
