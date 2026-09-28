@@ -1,0 +1,83 @@
+package com.wildfirechat.pan.controller.web;
+
+import com.wildfirechat.pan.config.DocsConfig;
+import com.wildfirechat.pan.dto.Result;
+import com.wildfirechat.pan.dto.request.WebSessionRequest;
+import com.wildfirechat.pan.filter.ClientAuthFilter;
+import com.wildfirechat.pan.service.IMUserService;
+import com.wildfirechat.pan.service.SignService;
+import com.wildfirechat.pan.service.auth.ClientAuthService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseCookie;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * 在线文档页面（H5，在客户端的工作台 webview 里打开；对外路径 /pan/doc/...）。
+ * 页面先经 dsbridge 的 getAuthCode 取码，再调 /doc/session 换成会话 Cookie，authCode 不进 URL。
+ */
+@Controller
+public class WebDocController {
+
+    @Autowired
+    private ClientAuthService clientAuthService;
+
+    @Autowired
+    private SignService signService;
+
+    @Autowired
+    private IMUserService imUserService;
+
+    @Autowired
+    private DocsConfig docsConfig;
+
+    @GetMapping("/doc")
+    public void root(HttpServletResponse response) {
+        // 相对地址：对外是 /pan/doc → /pan/doc/
+        response.setStatus(HttpServletResponse.SC_FOUND);
+        response.setHeader("Location", "doc/");
+    }
+
+    @GetMapping("/doc/")
+    public String index() {
+        return "forward:/doc/index.html";
+    }
+
+    @GetMapping("/doc/open")
+    public String open() {
+        return "forward:/doc/open.html";
+    }
+
+    @PostMapping("/doc/session")
+    @ResponseBody
+    public Result<Map<String, Object>> session(@Valid @RequestBody WebSessionRequest request,
+                                               HttpServletRequest httpRequest, HttpServletResponse response) {
+        String userId = clientAuthService.validateAuthCode(request.getAuthCode());
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(1002, "无效的 authCode");
+        }
+        boolean https = "https".equalsIgnoreCase(httpRequest.getHeader("X-Forwarded-Proto")) || httpRequest.isSecure();
+        ResponseCookie cookie = ResponseCookie.from(ClientAuthFilter.WEB_SESSION_COOKIE, signService.issueWebSession(userId))
+            .path(docsConfig.getPanPublicPath() + "/")
+            .httpOnly(true)
+            .secure(https)
+            .sameSite("Strict")
+            .maxAge(docsConfig.getWebSessionTtlSeconds())
+            .build();
+        response.addHeader("Set-Cookie", cookie.toString());
+        Map<String, Object> me = new LinkedHashMap<>();
+        me.put("userId", userId);
+        me.put("displayName", imUserService.getUserDisplayName(userId));
+        me.put("docsEnabled", docsConfig.isEnabled());
+        return Result.success(me);
+    }
+}

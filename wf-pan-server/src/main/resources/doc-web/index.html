@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文档</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="home">
+  <h1>文档</h1>
+  <div class="create" id="create">
+    <button data-type="docx"><div class="icon word">W</div>新建文档</button>
+    <button data-type="xlsx"><div class="icon cell">X</div>新建表格</button>
+    <button data-type="pptx"><div class="icon slide">P</div>新建演示</button>
+  </div>
+  <div class="tabs" id="tabs">
+    <button data-tab="recent" class="on">最近打开</button>
+    <button data-tab="shared">共享给我</button>
+  </div>
+  <div class="list" id="list"><div class="empty">加载中…</div></div>
+</div>
+<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var D = window.PanDoc;
+  var listEl = document.getElementById('list');
+  var tab = 'recent';
+  // 手机上只能查看（社区版的手机网页端不能编辑），不提供新建
+  if (D.isMobile()) document.getElementById('create').hidden = true;
+  try { tab = localStorage.getItem('pan.doc.tab') || 'recent'; } catch (e) { /* 无痕模式等 */ }
+
+  function showError(e) {
+    listEl.innerHTML = '<div class="notice">' + D.esc(e.notInClient ? '请在客户端中打开「文档」' : e.message) + '</div>';
+  }
+
+  function row(file, meta, perm) {
+    return '<div class="row" data-id="' + file.id + '">' + D.icon(file.name) +
+      '<div class="grow"><div class="name">' + D.esc(file.name) + '</div><div class="meta">' + D.esc(meta) + '</div></div>' +
+      (perm ? '<span class="tag' + (perm === 'EDIT' ? '' : ' muted') + '">' + D.PERM[perm] + '</span>' : '') + '</div>';
+  }
+
+  function load() {
+    Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) {
+      b.classList.toggle('on', b.dataset.tab === tab);
+    });
+    listEl.innerHTML = '<div class="empty">加载中…</div>';
+    if (tab === 'recent') {
+      D.api('docs/recent').then(function (items) {
+        if (!items.length) { listEl.innerHTML = '<div class="empty">还没有打开过文档。可以新建一个，或从网盘、聊天里打开。</div>'; return; }
+        listEl.innerHTML = items.map(function (it) {
+          return row(it.file, D.fmtTime(it.openedAt) + ' 打开 · ' + (it.file.creatorName || ''), it.permission);
+        }).join('');
+      }).catch(showError);
+    } else {
+      D.api('shares/with-me').then(function (items) {
+        if (!items.length) { listEl.innerHTML = '<div class="empty">暂时没有别人共享给你的文件</div>'; return; }
+        listEl.innerHTML = items.map(function (it) {
+          var from = it.sources.map(function (s) {
+            return s.targetType === 'GROUP' ? '群「' + s.targetName + '」' : s.createdByName;
+          });
+          var uniq = from.filter(function (v, i) { return from.indexOf(v) === i; });
+          return row(it.file, '来自 ' + uniq.join('、') + ' · ' + D.fmtTime(it.sharedAt), it.permission);
+        }).join('');
+      }).catch(showError);
+    }
+  }
+
+  document.getElementById('tabs').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    tab = b.dataset.tab;
+    try { localStorage.setItem('pan.doc.tab', tab); } catch (err) { /* 忽略 */ }
+    load();
+  });
+
+  listEl.addEventListener('click', function (e) {
+    var r = e.target.closest('.row');
+    if (r) D.openDoc(r.dataset.id);
+  });
+
+  document.getElementById('create').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    b.disabled = true;
+    D.api('docs/create', { type: b.dataset.type }).then(function (file) {
+      D.openDoc(file.id);
+      tab = 'recent';
+      setTimeout(load, 800);
+    }).catch(function (err) { D.toast(err.message); }).finally(function () { b.disabled = false; });
+  });
+
+  // 从别的页签回来时刷新（例如刚在编辑页里改了文件）
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+  load();
+})();
+</script>
+</body>
+</html>

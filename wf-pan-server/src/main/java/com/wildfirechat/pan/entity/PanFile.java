@@ -56,6 +56,18 @@ public class PanFile {
     @Column(name = "child_count")
     private Integer childCount = 0;
     
+    /** 当前版本号（老数据为 null，按 1 算） */
+    @Column(name = "version_no")
+    private Integer versionNo = 1;
+    
+    /**
+     * 在线编辑会话 key（ONLYOFFICE document.key）。同一编辑会话内的所有协同者必须一致：
+     * 会话结束保存（回调 status 2）或内容被编辑以外的途径替换（恢复版本）时更换；
+     * 编辑途中的定时保存（status 6）不换，否则后来打开的人会进到另一个会话、保存时互相覆盖。
+     */
+    @Column(name = "doc_key", length = 64)
+    private String docKey;
+    
     @Column(name = "creator_id", nullable = false, length = 64)
     private String creatorId;
     

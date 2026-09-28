@@ -56,7 +56,7 @@ mvn spring-boot:run
 ### 4. 初始管理员
 
 - 账号：admin
-- 密码：首次启动时随机生成并打印在日志中（仅一次），也可以通过 `pan.admin.initial-password` 预先指定
+- 密码：首次启动时随机生成并打印在日志中（仅一次），也可以通过 `pan.admin.initial_password` 预先指定
 - 登录后请立即修改密码；建议添加实际的 IM 用户为全局管理员（每个管理员有独立的登录密码）后删除 admin
 - 旧版本升级的实例：未设置个人密码的管理员仍使用原共享密码登录，修改密码后改用个人密码
 
@@ -123,6 +123,6 @@ java -jar target/wf-pan-server-1.0.0.jar
 ## 数据初始化
 
 应用启动时会自动创建表结构和初始化数据：
-1. 没有任何管理员时创建初始管理员 admin（随机密码打印在日志中，或使用 `pan.admin.initial-password`）
+1. 没有任何管理员时创建初始管理员 admin（随机密码打印在日志中，或使用 `pan.admin.initial_password`）
 2. 创建全局公共空间
 3. 为旧数据回填文件的对象存储 key

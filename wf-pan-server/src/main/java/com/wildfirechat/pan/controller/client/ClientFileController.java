@@ -1,5 +1,6 @@
 package com.wildfirechat.pan.controller.client;
 
+import com.wildfirechat.pan.constant.FilePermission;
 import com.wildfirechat.pan.dto.Result;
 import com.wildfirechat.pan.dto.request.CopyRequest;
 import com.wildfirechat.pan.dto.request.CreateFileRequest;
@@ -11,9 +12,13 @@ import com.wildfirechat.pan.dto.request.RenameRequest;
 import com.wildfirechat.pan.dto.request.SpaceIdRequest;
 import com.wildfirechat.pan.dto.response.FileUrlResponse;
 import com.wildfirechat.pan.dto.vo.FileVO;
+import com.wildfirechat.pan.entity.PanFile;
 import com.wildfirechat.pan.filter.ClientAuthFilter;
+import com.wildfirechat.pan.service.DownloadService;
 import com.wildfirechat.pan.service.FileService;
+import com.wildfirechat.pan.service.FileVersionService;
 import com.wildfirechat.pan.service.PermissionService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +35,9 @@ public class ClientFileController {
 
     @Autowired
     private PermissionService permissionService;
+
+    @Autowired
+    private DownloadService downloadService;
 
     /**
      * 检查文件上传权限
@@ -85,12 +93,17 @@ public class ClientFileController {
      */
     @PostMapping("/url")
     public Result<FileUrlResponse> getDownloadUrl(@Valid @RequestBody GetFileUrlRequest request,
-                                                  @RequestAttribute(ClientAuthFilter.USER_ID_KEY) String userId) {
-        FileVO file = fileService.getFileDetail(request.getFileId(), userId);
+                                                  @RequestAttribute(ClientAuthFilter.USER_ID_KEY) String userId,
+                                                  HttpServletRequest httpRequest) {
+        PanFile file = fileService.requireFile(request.getFileId(), userId, FilePermission.VIEW);
+        int versionNo = request.getVersionNo() != null ? request.getVersionNo() : FileVersionService.currentVersionNo(file);
+        String url = downloadService.downloadUrl(file, versionNo, userId, httpRequest);
         return Result.success(FileUrlResponse.builder()
             .fileId(file.getId())
             .name(file.getName())
-            .storageUrl(file.getStorageUrl())
+            .storageUrl(url != null ? url : "")
+            .versionNo(versionNo)
+            .permission(permissionService.effectivePermission(userId, file).name())
             .build());
     }
 }

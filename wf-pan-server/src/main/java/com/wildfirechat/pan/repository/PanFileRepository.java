@@ -3,7 +3,9 @@ package com.wildfirechat.pan.repository;
 import com.wildfirechat.pan.entity.PanFile;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -32,6 +34,15 @@ public interface PanFileRepository extends JpaRepository<PanFile, Long> {
     List<PanFile> findByParentIdInAndIsDeletedFalse(Collection<Long> parentIds);
 
     Optional<PanFile> findByIdAndIsDeletedFalse(Long id);
+
+    /**
+     * 加行锁读取（写新版本时用，避免两次保存同时写出相同的版本号）
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT f FROM PanFile f WHERE f.id = :id AND f.isDeleted = false")
+    Optional<PanFile> findByIdForUpdate(@Param("id") Long id);
+
+    List<PanFile> findByIdInAndIsDeletedFalse(Collection<Long> ids);
 
     @Modifying
     @Query("UPDATE PanFile f SET f.childCount = f.childCount + 1 WHERE f.id = :parentId")

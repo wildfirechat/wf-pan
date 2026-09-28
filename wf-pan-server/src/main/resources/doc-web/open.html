@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>文档</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="editor-page">
+  <div class="bar">
+    <div class="grow"><span class="title" id="title">加载中…</span><span class="tag" id="mode" hidden></span></div>
+    <div class="actions">
+      <button id="btnConvert" hidden title="转换为可编辑的格式，另存为新文件"><span class="lbl">转换后编辑</span><span class="ico">⇄</span></button>
+      <button id="btnShare" hidden title="分享"><span class="lbl">分享</span><span class="ico">⤴</span></button>
+      <button id="btnVersions" hidden title="历史版本"><span class="lbl">历史版本</span><span class="ico">⟲</span></button>
+      <button id="btnDownload" hidden title="下载"><span class="lbl">下载</span><span class="ico">⤓</span></button>
+    </div>
+  </div>
+  <div id="editor"></div>
+</div>
+<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var D = window.PanDoc;
+  var fileId = Number(new URLSearchParams(location.search).get('fileId'));
+  var info = null;
+  var docEditor = null;
+  var apiLoaded = null;
+  var REASON = {
+    permission: '只读 · 你只有查看权限',
+    convertible: '只读 · 旧格式，转换后可编辑',
+    format: '只读 · 该格式不支持在线编辑',
+    mobile: '只读 · 手机上只能查看，请在电脑上编辑',
+    requested: '只读'
+  };
+  var SOURCE = { UPLOAD: '上传', EDIT: '在线编辑', RESTORE: '恢复版本', CONVERT: '转换' };
+  // 自动化测试读这里的编辑器事件
+  window.__ev = [];
+  function ev(n, d) { window.__ev.push({ t: Date.now(), n: n, d: d }); }
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function fatal(msg) {
+    $('title').textContent = '';
+    $('editor').innerHTML = '<div class="notice">' + D.esc(msg) + '</div>';
+  }
+
+  function loadApi(src) {
+    if (!apiLoaded) {
+      apiLoaded = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function () { window.DocsAPI ? resolve() : reject(new Error('编辑器脚本异常')); };
+        s.onerror = function () { reject(new Error('编辑器加载失败（' + src + '）')); };
+        document.head.appendChild(s);
+      });
+    }
+    return apiLoaded;
+  }
+
+  function open() {
+    if (!fileId) { fatal('缺少文件参数'); return; }
+    D.api('docs/editor-config', { fileId: fileId, platform: D.isMobile() ? 'mobile' : 'pc' }).then(function (res) {
+      info = res;
+      document.title = res.fileName;
+      $('title').textContent = res.fileName;
+      var mode = $('mode');
+      mode.hidden = false;
+      mode.textContent = res.canEdit ? '可编辑' : (REASON[res.viewReason] || '只读');
+      mode.className = 'tag' + (res.canEdit ? '' : ' muted');
+      $('btnShare').hidden = !res.canShare;
+      $('btnVersions').hidden = false;
+      $('btnDownload').hidden = false;
+      $('btnConvert').hidden = !(res.convertible && !D.isMobile());
+      return loadApi(res.apiUrl).then(function () {
+        var cfg = res.config;
+        cfg.events = {
+          onAppReady: function () { ev('appReady'); },
+          onDocumentReady: function () { ev('documentReady'); },
+          onDocumentStateChange: function (e) { ev('stateChange', e && e.data); },
+          onError: function (e) { ev('error', e && e.data); },
+          onWarning: function (e) { ev('warning', e && e.data); },
+          onInfo: function (e) { ev('info', e && e.data); }
+        };
+        if (docEditor) { try { docEditor.destroyEditor(); } catch (e) { /* 忽略 */ } }
+        $('editor').innerHTML = '<div id="ph"></div>';
+        docEditor = new window.DocsAPI.DocEditor('ph', cfg);
+      });
+    }).catch(function (e) {
+      fatal(e.notInClient ? '请在客户端中打开' : e.message);
+    });
+  }
+
+  // ------------------------------------------------------------ 面板
+  function panel(title, bodyHtml, footerHtml) {
+    var m = document.createElement('div');
+    m.className = 'mask';
+    m.innerHTML = '<div class="panel"><header><span class="grow">' + D.esc(title) + '</span>' +
+      '<button class="link" data-close>关闭</button></header><div class="body">' + bodyHtml + '</div>' +
+      (footerHtml ? '<footer>' + footerHtml + '</footer>' : '') + '</div>';
+    m.addEventListener('click', function (e) {
+      if (e.target === m || e.target.hasAttribute('data-close')) m.remove();
+    });
+    document.body.appendChild(m);
+    return m;
+  }
+
+  // 分享
+  function openShare() {
+    var canGroup = D.Bridge.has('chooseGroup');
+    var m = panel('分享「' + info.fileName + '」', '<div class="empty">加载中…</div>',
+      '<select id="newPerm"><option value="VIEW">可查看</option><option value="EDIT">可编辑</option></select>' +
+      '<button class="primary" id="addUser">添加成员</button>' +
+      '<button id="addGroup"' + (canGroup ? '' : ' disabled') + '>添加群</button>' +
+      '<div class="hint">按群分享时，此刻在群里的人才有权限；退群后最长 1 分钟内失效。' +
+      (canGroup ? '' : '当前客户端版本不支持选群。') + '</div>');
+    var body = m.querySelector('.body');
+
+    function render() {
+      D.api('shares/list', { fileId: fileId }).then(function (list) {
+        if (!list.length) { body.innerHTML = '<div class="empty">还没有分享给任何人</div>'; return; }
+        body.innerHTML = list.map(function (s) {
+          var av = s.targetType === 'GROUP' ? '<div class="avatar">群</div>'
+            : '<div class="avatar">' + (s.targetPortrait ? '<img src="' + D.esc(s.targetPortrait) + '" alt="">' : D.esc((s.targetName || '?').slice(0, 1))) + '</div>';
+          return '<div class="row" data-id="' + s.id + '" data-type="' + s.targetType + '" data-target="' + D.esc(s.targetId) + '">' + av +
+            '<div class="grow"><div class="name">' + D.esc(s.targetName) + '</div><div class="meta">' +
+            (s.targetType === 'GROUP' ? '群' : '成员') + ' · ' + D.esc(s.createdByName) + ' 分享于 ' + D.fmtTime(s.createdAt) + '</div></div>' +
+            '<select data-perm><option value="VIEW"' + (s.permission === 'VIEW' ? ' selected' : '') + '>可查看</option>' +
+            '<option value="EDIT"' + (s.permission === 'EDIT' ? ' selected' : '') + '>可编辑</option></select>' +
+            '<button class="link danger" data-remove>移除</button></div>';
+        }).join('');
+      }).catch(function (e) { body.innerHTML = '<div class="notice">' + D.esc(e.message) + '</div>'; });
+    }
+
+    function addTargets(type, ids) {
+      var perm = m.querySelector('#newPerm').value;
+      return ids.reduce(function (p, id) {
+        return p.then(function () { return D.api('shares/add', { fileId: fileId, targetType: type, targetId: id, permission: perm }); });
+      }, Promise.resolve()).then(render).catch(function (e) { D.toast(e.message); render(); });
+    }
+
+    body.addEventListener('change', function (e) {
+      if (!e.target.hasAttribute('data-perm')) return;
+      var r = e.target.closest('.row');
+      D.api('shares/add', { fileId: fileId, targetType: r.dataset.type, targetId: r.dataset.target, permission: e.target.value })
+        .then(function () { D.toast('已修改权限'); }).catch(function (err) { D.toast(err.message); render(); });
+    });
+    body.addEventListener('click', function (e) {
+      if (!e.target.hasAttribute('data-remove')) return;
+      var r = e.target.closest('.row');
+      D.api('shares/remove', { shareId: Number(r.dataset.id) }).then(render).catch(function (err) { D.toast(err.message); });
+    });
+    m.querySelector('#addUser').addEventListener('click', function () {
+      D.Bridge.call('chooseContacts', {}).then(function (res) {
+        if (!res || res.code !== 0 || !res.data) {
+          if (res && res.code === -2) D.toast('选人不可用，请关闭本页后重新打开');
+          return;
+        }
+        var users = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        return addTargets('USER', users.map(function (u) { return u.uid; }));
+      }).catch(function (e) { D.toast(e.message); });
+    });
+    m.querySelector('#addGroup').addEventListener('click', function () {
+      D.Bridge.call('chooseGroup', {}).then(function (res) {
+        if (!res || res.code !== 0 || !res.data) return;
+        var groups = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        return addTargets('GROUP', groups.map(function (g) { return g.gid || g.groupId || g.target; }));
+      }).catch(function (e) { D.toast(e.message); });
+    });
+    render();
+  }
+
+  // 历史版本
+  function openVersions() {
+    var m = panel('历史版本', '<div class="empty">加载中…</div>',
+      '<div class="hint">每次编辑会话结束、恢复历史版本都会生成新版本；只保留最近若干个。</div>');
+    var body = m.querySelector('.body');
+    function render() {
+      D.api('versions/list', { fileId: fileId }).then(function (list) {
+        body.innerHTML = list.map(function (v) {
+          return '<div class="row" data-no="' + v.versionNo + '"><div class="avatar">v' + v.versionNo + '</div>' +
+            '<div class="grow"><div class="name">' + D.esc(v.editorName || '') + ' · ' + (SOURCE[v.source] || v.source) +
+            (v.current ? ' <span class="tag">当前</span>' : '') + '</div>' +
+            '<div class="meta">' + D.fmtTime(v.createdAt) + ' · ' + D.fmtSize(v.size) + '</div></div>' +
+            '<button class="link" data-dl>下载</button>' +
+            (!v.current && info.permission === 'EDIT' ? '<button class="link" data-restore>恢复</button>' : '') + '</div>';
+        }).join('') || '<div class="empty">暂无版本记录</div>';
+      }).catch(function (e) { body.innerHTML = '<div class="notice">' + D.esc(e.message) + '</div>'; });
+    }
+    body.addEventListener('click', function (e) {
+      var r = e.target.closest('.row');
+      if (!r) return;
+      var no = Number(r.dataset.no);
+      if (e.target.hasAttribute('data-dl')) {
+        D.api('files/url', { fileId: fileId, versionNo: no }).then(function (u) { D.openLink(u.storageUrl); })
+          .catch(function (err) { D.toast(err.message); });
+      } else if (e.target.hasAttribute('data-restore')) {
+        if (!confirm('恢复到 v' + no + '？当前内容会保留为历史版本。正在编辑的人需要重新打开。')) return;
+        D.api('versions/restore', { fileId: fileId, versionNo: no }).then(function (v) {
+          D.toast('已恢复，当前为 v' + v.versionNo);
+          m.remove();
+          open();
+        }).catch(function (err) { D.toast(err.message); });
+      }
+    });
+    render();
+  }
+
+  $('btnShare').addEventListener('click', openShare);
+  $('btnVersions').addEventListener('click', openVersions);
+  $('btnDownload').addEventListener('click', function () {
+    D.api('files/url', { fileId: fileId }).then(function (u) { D.openLink(u.storageUrl); }).catch(function (e) { D.toast(e.message); });
+  });
+  $('btnConvert').addEventListener('click', function () {
+    var b = $('btnConvert');
+    b.disabled = true;
+    D.toast('正在转换…');
+    D.api('docs/convert', { fileId: fileId }).then(function (f) {
+      D.toast('已另存为「' + f.name + '」');
+      D.openDoc(f.id);
+    }).catch(function (e) { D.toast(e.message); }).finally(function () { b.disabled = false; });
+  });
+
+  open();
+})();
+</script>
+</body>
+</html>

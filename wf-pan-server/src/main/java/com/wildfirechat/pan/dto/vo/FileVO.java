@@ -20,6 +20,7 @@ public class FileVO {
     private String md5;
     private String storageUrl;
     private int childCount;
+    private int versionNo;
     private String creatorId;
     private String creatorName;
     private String creatorPortrait;  // 创建者头像

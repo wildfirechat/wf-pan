@@ -1,9 +1,14 @@
 package com.wildfirechat.pan.service;
 
+import com.wildfirechat.pan.constant.FilePermission;
+import com.wildfirechat.pan.constant.FileType;
+import com.wildfirechat.pan.constant.ShareTargetType;
 import com.wildfirechat.pan.constant.SpaceType;
 import com.wildfirechat.pan.entity.PanFile;
+import com.wildfirechat.pan.entity.PanShare;
 import com.wildfirechat.pan.entity.PanSpace;
 import com.wildfirechat.pan.repository.PanGlobalAdminRepository;
+import com.wildfirechat.pan.repository.PanShareRepository;
 import com.wildfirechat.pan.repository.PanSpaceAdminRepository;
 import com.wildfirechat.pan.repository.PanSpaceRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +26,8 @@ public class PermissionService {
     private final PanSpaceAdminRepository spaceAdminRepository;
     private final PanGlobalAdminRepository globalAdminRepository;
     private final ConfigService configService;
+    private final PanShareRepository shareRepository;
+    private final IMGroupService groupService;
 
     public boolean isGlobalAdmin(String userId) {
         return globalAdminRepository.existsByUserId(userId);
@@ -57,6 +64,52 @@ public class PermissionService {
             case USER_PUBLIC -> isOwner(userId, space);
             case USER_PRIVATE -> isOwner(userId, space) || canGlobalAdminAccessPrivateSpace(userId);
         };
+    }
+
+    /**
+     * 用户对文件的实际权限：空间规则、单独分享、群分享三者取最大。
+     * 下载、打开编辑器、查看版本等按单个文件访问的入口都走这里。
+     */
+    public FilePermission effectivePermission(String userId, PanFile file) {
+        if (userId == null || file == null || Boolean.TRUE.equals(file.getIsDeleted())) {
+            return FilePermission.NONE;
+        }
+        PanSpace space = spaceRepository.findById(file.getSpaceId()).orElse(null);
+        if (space == null) {
+            return FilePermission.NONE;
+        }
+        if (canManageSpace(userId, space)) {
+            return FilePermission.EDIT;
+        }
+        FilePermission perm = canAccessSpace(userId, space) ? FilePermission.VIEW : FilePermission.NONE;
+        // 分享只针对文件（v1 不支持文件夹分享）
+        if (file.getType() != FileType.FILE) {
+            return perm;
+        }
+        PanShare userShare = shareRepository
+            .findByFileIdAndTargetTypeAndTargetId(file.getId(), ShareTargetType.USER, userId).orElse(null);
+        if (userShare != null) {
+            perm = FilePermission.max(perm, userShare.getPermission());
+        }
+        if (perm == FilePermission.EDIT) {
+            return perm;
+        }
+        for (PanShare groupShare : shareRepository.findByFileIdAndTargetType(file.getId(), ShareTargetType.GROUP)) {
+            if (groupShare.getPermission().ordinal() <= perm.ordinal()) {
+                continue;
+            }
+            if (groupService.isMember(groupShare.getTargetId(), userId)) {
+                perm = FilePermission.max(perm, groupShare.getPermission());
+            }
+        }
+        return perm;
+    }
+
+    /**
+     * 谁能分享：文件所在空间的管理者（本人、空间管理员、全局管理员）。v1 可编辑者不能再转分享。
+     */
+    public boolean canShare(String userId, PanFile file) {
+        return file != null && file.getType() == FileType.FILE && canManageSpace(userId, file.getSpaceId());
     }
 
     /**

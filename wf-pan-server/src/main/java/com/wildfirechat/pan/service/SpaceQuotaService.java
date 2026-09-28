@@ -32,6 +32,19 @@ public class SpaceQuotaService {
         }
     }
 
+    /**
+     * 文件内容被替换（在线编辑保存、恢复版本）时按差值调整已用配额，不检查上限：
+     * 编辑结果已经产生，拒绝保存只会丢掉它
+     */
+    @Transactional
+    public void adjustUsedQuota(Long spaceId, long delta) {
+        if (delta > 0) {
+            spaceRepository.increaseUsedQuota(spaceId, delta);
+        } else {
+            release(spaceId, -delta);
+        }
+    }
+
     @Transactional
     public void adjustCounts(Long spaceId, int files, int folders) {
         if (files != 0 || folders != 0) {

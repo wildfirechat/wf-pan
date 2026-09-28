@@ -16,7 +16,7 @@ import java.io.IOException;
 /**
  * 管理端口的访问控制：
  * <ul>
- *     <li>禁止访问客户端接口 /api/v1/**</li>
+ *     <li>禁止访问客户端接口 /api/v1/** 和客户端网页路径（在线文档、下载、ONLYOFFICE 回调）</li>
  *     <li>除登录接口外，/api/** 需要有效的管理员会话，且该管理员仍在全局管理员列表中</li>
  *     <li>其余路径（管理后台前端页面和静态资源）放行</li>
  * </ul>
@@ -51,6 +51,10 @@ public class AdminAuthFilter extends OncePerRequestFilter {
         if (path.startsWith(FilterSupport.CLIENT_API_PREFIX)) {
             log.warn("Client API requested on admin port: {}", path);
             FilterSupport.writeError(response, HttpServletResponse.SC_FORBIDDEN, 403, "客户端接口不允许从管理端口访问");
+            return;
+        }
+        if (FilterSupport.isClientWebPath(path)) {
+            FilterSupport.writeError(response, HttpServletResponse.SC_NOT_FOUND, 404, "Not Found");
             return;
         }
 

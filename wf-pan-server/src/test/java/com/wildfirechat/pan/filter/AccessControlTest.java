@@ -1,8 +1,11 @@
 package com.wildfirechat.pan.filter;
 
+import com.wildfirechat.pan.config.ProxiedRequestValve;
 import com.wildfirechat.pan.repository.PanGlobalAdminRepository;
+import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.auth.AdminAuthService;
 import com.wildfirechat.pan.service.auth.ClientAuthService;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +43,9 @@ class AccessControlTest {
 
     @Autowired
     private PanGlobalAdminRepository globalAdminRepository;
+
+    @Autowired
+    private SignService signService;
 
     @MockBean
     private ClientAuthService clientAuthService;
@@ -175,5 +181,53 @@ class AccessControlTest {
                 .header("Access-Control-Request-Method", "POST")
                 .header("Access-Control-Request-Headers", "authCode,Content-Type"))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void docPageSessionAuthenticatesClientApiOnlyWithCsrfHeader() throws Exception {
+        Cookie session = new Cookie(ClientAuthFilter.WEB_SESSION_COOKIE, signService.issueWebSession("alice"));
+
+        mockMvc.perform(post("/api/v1/spaces/list").with(port(CLIENT_PORT)).cookie(session)
+                .header(ClientAuthFilter.WEB_HEADER, "1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/v1/spaces/list").with(port(CLIENT_PORT)).cookie(session))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(1001));
+        Cookie forged = new Cookie(ClientAuthFilter.WEB_SESSION_COOKIE, session.getValue() + "x");
+        mockMvc.perform(post("/api/v1/spaces/list").with(port(CLIENT_PORT)).cookie(forged)
+                .header(ClientAuthFilter.WEB_HEADER, "1"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(1004));
+    }
+
+    @Test
+    void docWebPathsUseTheirOwnAuthOnClientPort() throws Exception {
+        mockMvc.perform(get("/dl/1").with(port(CLIENT_PORT))
+                .param("v", "1").param("u", "alice").param("e", "9999999999").param("s", "forged"))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/docs/file/1").with(port(CLIENT_PORT)))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void onlyofficeCallbackRejectsProxiedRequests() throws Exception {
+        mockMvc.perform(get("/internal/docs/file/1").with(port(CLIENT_PORT)).header("X-Forwarded-For", "1.2.3.4"))
+            .andExpect(status().isNotFound());
+        // native 转发头策略下 RemoteIpValve 会删掉 X-Forwarded-For，以 ProxiedRequestValve 的标记为准
+        mockMvc.perform(get("/internal/docs/file/1").with(port(CLIENT_PORT))
+                .requestAttr(ProxiedRequestValve.PROXIED_ATTRIBUTE, Boolean.TRUE))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void docWebPathsAreNotReachableFromAdminPort() throws Exception {
+        mockMvc.perform(get("/dl/1").with(port(ADMIN_PORT)))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(post("/doc/session").with(port(ADMIN_PORT))
+                .contentType(MediaType.APPLICATION_JSON).content("{\"authCode\":\"valid-code\"}"))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/internal/docs/file/1").with(port(ADMIN_PORT)))
+            .andExpect(status().isNotFound());
     }
 }

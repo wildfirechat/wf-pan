@@ -23,7 +23,11 @@ public class DataInitializer implements ApplicationRunner {
     @Autowired
     private PanSpaceRepository spaceRepository;
 
-    @Value("${pan.admin.initial-password:}")
+    /**
+     * 初始管理员 admin 的密码，只在还没有任何全局管理员时使用。
+     * 一站式部署由安装脚本随机生成后写入配置；未配置时随机生成并打印到日志
+     */
+    @Value("${pan.admin.initial_password:}")
     private String initialAdminPassword;
 
     @Override

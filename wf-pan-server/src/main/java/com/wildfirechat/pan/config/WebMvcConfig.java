@@ -6,8 +6,10 @@ import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactor
 import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
@@ -35,11 +37,24 @@ public class WebMvcConfig implements WebMvcConfigurer {
     }
 
     /**
+     * 在线文档页面（H5）：/doc/** → classpath:/doc-web/。
+     * 不放 static/：管理后台前端构建时会清空并重写 static/（见 wf-pan-admin/vite.config.js），且 static/ 不入库
+     */
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/doc/**")
+            .addResourceLocations("classpath:/doc-web/")
+            .setCacheControl(CacheControl.noCache());
+    }
+
+    /**
      * 配置双端口：server.port（客户端）+ server.admin-port（管理）
      */
     @Bean
     public ServletWebServerFactory servletContainer() {
         TomcatServletWebServerFactory tomcat = new TomcatServletWebServerFactory();
+        // 在这里加的 valve 排在 Spring Boot 之后才加的 RemoteIpValve 前面
+        tomcat.addEngineValves(new ProxiedRequestValve());
         tomcat.addAdditionalTomcatConnectors(createAdminConnector());
         return tomcat;
     }

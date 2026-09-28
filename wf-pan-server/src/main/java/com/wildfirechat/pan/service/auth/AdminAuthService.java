@@ -114,7 +114,7 @@ public class AdminAuthService {
             log.warn("已创建初始管理员 {}，随机密码: {} （仅显示一次，请登录后立即修改，并添加实际的IM用户为管理员后删除该账号）",
                 INITIAL_ADMIN_ID, password);
         } else {
-            log.info("已创建初始管理员 {}，密码来自配置 pan.admin.initial-password", INITIAL_ADMIN_ID);
+            log.info("已创建初始管理员 {}，密码来自配置 pan.admin.initial_password", INITIAL_ADMIN_ID);
         }
     }
 

@@ -35,6 +35,11 @@ public class OperationLogService {
     public static final String OP_LOGIN = "LOGIN";
     public static final String OP_LOGOUT = "LOGOUT";
     public static final String OP_CHANGE_PASSWORD = "CHANGE_PASSWORD";
+    public static final String OP_NEW_VERSION = "NEW_VERSION";
+    public static final String OP_SHARE_FILE = "SHARE_FILE";
+    public static final String OP_UNSHARE_FILE = "UNSHARE_FILE";
+    public static final String OP_CREATE_DOC = "CREATE_DOC";
+    public static final String OP_CONVERT_DOC = "CONVERT_DOC";
 
     // 目标类型常量
     public static final String TARGET_FILE = "FILE";

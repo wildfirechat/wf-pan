@@ -136,6 +136,16 @@ public class StorageService {
     }
 
     /**
+     * 网盘 bucket 中对象的访问地址
+     */
+    public String urlOf(String key) {
+        if (bucketBaseUrl == null) {
+            throw new IllegalStateException("未配置对象存储");
+        }
+        return bucketBaseUrl + StorageUrls.encodePath(key);
+    }
+
+    /**
      * 网盘 bucket 中对象的实际大小；查询失败时为空
      */
     public OptionalLong objectSize(String key) {

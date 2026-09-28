@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { useUserStore } from '../store/user'
 
 const routes = [
@@ -57,8 +57,9 @@ const routes = [
   }
 ]
 
+// hash 路由：部署在任意子路径下（如 NG 的 /pan-admin/）都不需要服务端做前端路由回退
 const router = createRouter({
-  history: createWebHistory('/'),
+  history: createWebHashHistory(),
   routes
 })
 

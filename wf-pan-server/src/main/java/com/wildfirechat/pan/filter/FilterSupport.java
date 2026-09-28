@@ -18,6 +18,15 @@ final class FilterSupport {
     }
 
     /**
+     * 客户端端口上不用 authCode、由控制器自己鉴权的路径：
+     * 在线文档页面（页面会话）、签名下载（链接签名）、ONLYOFFICE 回调（ONLYOFFICE 签的 JWT）
+     */
+    static boolean isClientWebPath(String path) {
+        return path.equals("/doc") || path.startsWith("/doc/")
+            || path.startsWith("/dl/") || path.startsWith("/internal/docs/");
+    }
+
+    /**
      * 容器解码并规范化（去掉 ".."、";参数"）后的路径。
      * 不能用 getRequestURI()：它是原始值，"/api/v1/../x" 这类路径会绕过前缀判断。
      */

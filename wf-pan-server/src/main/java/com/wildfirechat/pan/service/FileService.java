@@ -1,5 +1,6 @@
 package com.wildfirechat.pan.service;
 
+import com.wildfirechat.pan.constant.FilePermission;
 import com.wildfirechat.pan.constant.FileType;
 import com.wildfirechat.pan.dto.request.CopyRequest;
 import com.wildfirechat.pan.dto.request.CreateFileRequest;
@@ -12,6 +13,8 @@ import com.wildfirechat.pan.entity.PanFile;
 import com.wildfirechat.pan.entity.PanSpace;
 import com.wildfirechat.pan.exception.BusinessException;
 import com.wildfirechat.pan.repository.PanFileRepository;
+import com.wildfirechat.pan.repository.PanRecentRepository;
+import com.wildfirechat.pan.repository.PanShareRepository;
 import com.wildfirechat.pan.repository.PanSpaceRepository;
 import com.wildfirechat.pan.service.StorageService.StoredObject;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +53,10 @@ public class FileService {
     private final IMUserService imUserService;
     private final OperationLogService operationLogService;
     private final ConfigService configService;
+    private final ObjectStoreService objectStoreService;
+    private final FileVersionService fileVersionService;
+    private final PanShareRepository shareRepository;
+    private final PanRecentRepository recentRepository;
 
     // ---------------------------------------------------------------- 查询
 
@@ -62,10 +69,24 @@ public class FileService {
 
     public FileVO getFileDetail(Long fileId, String userId) {
         PanFile file = requireFile(fileId);
-        if (!permissionService.canAccessSpace(userId, requireSpace(file.getSpaceId()))) {
+        if (!permissionService.effectivePermission(userId, file).atLeast(FilePermission.VIEW)) {
             throw new BusinessException("无权限访问该文件");
         }
-        return convertToVO(file);
+        return toVO(file);
+    }
+
+    /**
+     * 按单个文件访问时取记录并校验权限（空间规则 + 分享），返回实体
+     */
+    public PanFile requireFile(Long fileId, String userId, FilePermission need) {
+        PanFile file = requireFile(fileId);
+        if (isFolder(file)) {
+            throw new BusinessException("不是文件");
+        }
+        if (!permissionService.effectivePermission(userId, file).atLeast(need)) {
+            throw new BusinessException(need == FilePermission.EDIT ? "无权限编辑该文件" : "无权限访问该文件");
+        }
+        return file;
     }
 
     public List<FileVO> getFileListAsAdmin(Long spaceId, Long parentId) {
@@ -76,22 +97,22 @@ public class FileService {
     public FileVO getFileDetailAsAdmin(Long fileId) {
         PanFile file = requireFile(fileId);
         requireConsoleAccess(requireSpace(file.getSpaceId()));
-        return convertToVO(file);
+        return toVO(file);
     }
 
     public Page<FileVO> getAllFilesAsAdmin(Pageable pageable) {
         return fileRepository.findAllForConsole(configService.isAdminCanManagePrivateSpace(), pageable)
-            .map(this::convertToVO);
+            .map(this::toVO);
     }
 
     public Page<FileVO> globalSearchAsAdmin(String keyword, Pageable pageable) {
         return fileRepository.globalSearch(keyword, configService.isAdminCanManagePrivateSpace(), pageable)
-            .map(this::convertToVO);
+            .map(this::toVO);
     }
 
     public Page<FileVO> searchBySpaceAsAdmin(Long spaceId, String keyword, Pageable pageable) {
         requireConsoleAccess(requireSpace(spaceId));
-        return fileRepository.searchBySpaceId(spaceId, keyword, pageable).map(this::convertToVO);
+        return fileRepository.searchBySpaceId(spaceId, keyword, pageable).map(this::toVO);
     }
 
     // ---------------------------------------------------------------- 创建
@@ -109,7 +130,7 @@ public class FileService {
 
         operationLogService.log(userId, OP_CREATE_FOLDER, TARGET_FOLDER, saved.getId(), spaceId,
             details("folderName", request.getName(), "spaceId", spaceId, "parentId", parentId));
-        return convertToVO(saved);
+        return toVO(saved);
     }
 
     /**
@@ -122,7 +143,9 @@ public class FileService {
         Long parentId = resolveParent(spaceId, request.getParentId());
         checkDuplicateName(spaceId, parentId, request.getName(), null);
 
-        boolean copy = Boolean.TRUE.equals(request.getCopy());
+        // 网盘桶私有（服务端读写）时一律复制进网盘桶：客户端是经 IM 上传到公开读的媒体桶的，
+        // 不复制的话文件仍能凭地址直接下载，分享/退群后失去权限就无从谈起
+        boolean copy = Boolean.TRUE.equals(request.getCopy()) || objectStoreService.isSupported();
         StoredObject object = copy ? importObject(request.getStorageUrl())
                                    : storageService.resolveReference(request.getStorageUrl());
         // 网盘 bucket 中的对象以实际大小为准，不信任客户端上报
@@ -141,8 +164,8 @@ public class FileService {
 
         operationLogService.log(userId, OP_UPLOAD_FILE, TARGET_FILE, saved.getId(), spaceId,
             details("fileName", request.getName(), "fileSize", size, "spaceId", spaceId,
-                "parentId", parentId, "ossCopy", copy));
-        return convertToVO(saved);
+                "parentId", parentId, "ossCopy", !object.url().equals(request.getStorageUrl())));
+        return toVO(saved);
     }
 
     // ---------------------------------------------------------------- 删除
@@ -183,9 +206,11 @@ public class FileService {
         fileRepository.save(file);
         decrementChildCount(file.getParentId());
 
-        String key = file.getStorageKey();
-        if (StringUtils.hasText(key) && fileRepository.countByStorageKeyAndIsDeletedFalse(key) == 0) {
-            runAfterCommit(() -> storageService.deleteObject(key));
+        // 文件：删掉它的分享、最近打开和版本记录；各版本的对象没有其他文件或版本引用时，事务提交后删除
+        if (!isFolder(file)) {
+            shareRepository.deleteByFileId(file.getId());
+            recentRepository.deleteByFileId(file.getId());
+            fileVersionService.releaseAllVersions(file);
         }
 
         operationLogService.log(operator, operation, targetType(file), file.getId(), file.getSpaceId(),
@@ -202,7 +227,7 @@ public class FileService {
         String oldName = file.getName();
         String newName = request.getNewName();
         if (oldName.equals(newName)) {
-            return convertToVO(file);
+            return toVO(file);
         }
         checkDuplicateName(file.getSpaceId(), file.getParentId(), newName, file.getId());
         file.setName(newName);
@@ -210,7 +235,7 @@ public class FileService {
 
         operationLogService.log(userId, OP_RENAME_FILE, targetType(file), file.getId(), file.getSpaceId(),
             details("oldName", oldName, "newName", newName, "fileType", file.getType().name()));
-        return convertToVO(saved);
+        return toVO(saved);
     }
 
     @Transactional
@@ -227,7 +252,7 @@ public class FileService {
         Long oldSpaceId = file.getSpaceId();
         Long oldParentId = file.getParentId();
         if (oldSpaceId.equals(targetSpaceId) && Objects.equals(oldParentId, targetParentId)) {
-            return convertToVO(file);
+            return toVO(file);
         }
         checkDuplicateName(targetSpaceId, targetParentId, file.getName(), file.getId());
 
@@ -243,7 +268,7 @@ public class FileService {
             details("fileName", file.getName(), "fileType", file.getType().name(),
                 "oldSpaceId", oldSpaceId, "newSpaceId", targetSpaceId,
                 "oldParentId", oldParentId, "newParentId", targetParentId));
-        return convertToVO(saved);
+        return toVO(saved);
     }
 
     /**
@@ -253,7 +278,8 @@ public class FileService {
     @Transactional
     public FileVO copyFile(CopyRequest request, String userId) {
         PanFile source = requireFile(request.getFileId());
-        if (!permissionService.canAccessSpace(userId, requireSpace(source.getSpaceId()))) {
+        // 读权限含分享给我的文件
+        if (!permissionService.effectivePermission(userId, source).atLeast(FilePermission.VIEW)) {
             throw new BusinessException("无权限访问该文件");
         }
         Long targetSpaceId = request.getTargetSpaceId();
@@ -281,7 +307,7 @@ public class FileService {
             details("fileName", source.getName(), "fileType", source.getType().name(),
                 "sourceSpaceId", source.getSpaceId(), "targetSpaceId", targetSpaceId,
                 "targetParentId", targetParentId, "ossCopy", copyObjects));
-        return convertToVO(copy);
+        return toVO(copy);
     }
 
     private PanFile copyNode(PanFile source, Long spaceId, Long parentId, String userId,
@@ -342,7 +368,7 @@ public class FileService {
         return fileRepository
             .findBySpaceIdAndParentIdAndIsDeletedFalseOrderByTypeDescNameAsc(spaceId, normalizeParentId(parentId))
             .stream()
-            .map(this::convertToVO)
+            .map(this::toVO)
             .toList();
     }
 
@@ -363,19 +389,6 @@ public class FileService {
             });
         }
         return object;
-    }
-
-    private static void runAfterCommit(Runnable action) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            action.run();
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                action.run();
-            }
-        });
     }
 
     /**
@@ -533,7 +546,7 @@ public class FileService {
         return details;
     }
 
-    private FileVO convertToVO(PanFile file) {
+    public FileVO toVO(PanFile file) {
         String creatorId = file.getCreatorId() != null ? file.getCreatorId() : "";
         UserInfoVO creator = imUserService.getUserInfoVO(creatorId);
 
@@ -548,6 +561,7 @@ public class FileService {
             .md5(file.getMd5() != null ? file.getMd5() : "")
             .storageUrl(file.getStorageUrl() != null ? file.getStorageUrl() : "")
             .childCount(file.getChildCount() != null ? file.getChildCount() : 0)
+            .versionNo(FileVersionService.currentVersionNo(file))
             .creatorId(creatorId)
             .creatorName(creator.getDisplayName())
             .creatorPortrait(creator.getPortrait() != null ? creator.getPortrait() : "")

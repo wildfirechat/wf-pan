@@ -41,6 +41,10 @@ public interface PanSpaceRepository extends JpaRepository<PanSpace, Long> {
     int tryIncreaseUsedQuota(@Param("id") Long id, @Param("size") long size);
 
     @Modifying
+    @Query("UPDATE PanSpace s SET s.usedQuota = s.usedQuota + :size WHERE s.id = :id")
+    void increaseUsedQuota(@Param("id") Long id, @Param("size") long size);
+
+    @Modifying
     @Query("UPDATE PanSpace s SET s.usedQuota = " +
            "CASE WHEN s.usedQuota > :size THEN s.usedQuota - :size ELSE 0 END WHERE s.id = :id")
     void decreaseUsedQuota(@Param("id") Long id, @Param("size") long size);

@@ -56,10 +56,9 @@ export default defineConfig(({ mode }) => {
   const isDev = mode === 'development'
   
   return {
-    // 资源路径以根目录开头
-    // 开发时访问 http://localhost:3000/
-    // 生产部署后访问 http://localhost:8080/
-    base: '/',
+    // 资源用相对路径：生产部署后既可在 http://localhost:8080/ 访问，
+    // 也可由 NG 按子路径（如 /pan-admin/）发布；开发时访问 http://localhost:3000/
+    base: isDev ? '/' : './',
     
     plugins: [
       vue(),
