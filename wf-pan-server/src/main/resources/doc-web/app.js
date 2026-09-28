@@ -32,10 +32,15 @@
         };
         var arg = JSON.stringify({ data: args === undefined ? null : args, _dscbstub: name });
         var ret = window._dsbridge ? window._dsbridge.call(method, arg) : prompt('_dsbridge=' + method, arg);
-        // 找不到方法时同步返回 code -1，回调永远不会来
+        // 同步返回值对异步方法没有意义：dsbridge_flutter 调异步方法成功时同步返回的也是 code -1
+        // （只有同步方法才改成 0），结果从回调来。只有客户端确实没有这个方法时才判"不支持"。
         try {
           var r = JSON.parse(ret || '{}');
-          if (r && r.code === -1) { if (timer) clearTimeout(timer); delete window[name]; reject(new Error('客户端不支持 ' + method)); }
+          if (r && r.code === -1 && !Bridge.has(method)) {
+            if (timer) clearTimeout(timer);
+            delete window[name];
+            reject(new Error('客户端不支持 ' + method));
+          }
         } catch (e) { /* 正常情况下异步方法同步返回空 */ }
       });
     },
