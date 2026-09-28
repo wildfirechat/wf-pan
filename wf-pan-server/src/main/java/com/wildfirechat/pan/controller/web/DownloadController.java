@@ -42,10 +42,11 @@ public class DownloadController {
 
     @GetMapping("/dl/{fileId}")
     public void download(@PathVariable Long fileId,
-                         @RequestParam("v") int versionNo,
-                         @RequestParam("u") String userId,
-                         @RequestParam("e") long expire,
-                         @RequestParam("s") String sig,
+                         // 缺参数也按签名无效回 403，别落到全局异常处理变成 200 + 系统错误
+                         @RequestParam(value = "v", defaultValue = "0") int versionNo,
+                         @RequestParam(value = "u", defaultValue = "") String userId,
+                         @RequestParam(value = "e", defaultValue = "0") long expire,
+                         @RequestParam(value = "s", required = false) String sig,
                          @RequestParam(value = "inline", required = false) String inline,
                          @RequestHeader(value = "Range", required = false) String range,
                          HttpServletResponse response) throws Exception {
