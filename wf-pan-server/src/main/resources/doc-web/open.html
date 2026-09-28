@@ -89,7 +89,10 @@
         docEditor = new window.DocsAPI.DocEditor('ph', cfg);
       });
     }).catch(function (e) {
-      fatal(e.notInClient ? '请在客户端中打开' : e.message);
+      if (e.notInClient) { fatal('请在客户端中打开'); return; }
+      // 聊天里的文件卡片也指向本页：打不开（格式不支持、在线文档未启用）时仍给下载，有没有权限由 files/url 判
+      fatal(e.message);
+      $('btnDownload').hidden = false;
     });
   }
 

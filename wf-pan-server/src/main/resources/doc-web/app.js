@@ -12,7 +12,8 @@
   var cbSeq = 0;
   var Bridge = {
     available: function () {
-      return !!(window._dsbridge || window._dswk || navigator.userAgent.indexOf('_dsbridge') !== -1);
+      // 野火客户端的 WebView 在 UA 上追加 WF-DSBridge（chat/lib/workspace/webview_support.dart）
+      return !!(window._dsbridge || window._dswk || /WF-DSBridge|_dsbridge/.test(navigator.userAgent));
     },
     callSync: function (method, args) {
       var arg = JSON.stringify({ data: args === undefined ? null : args });
