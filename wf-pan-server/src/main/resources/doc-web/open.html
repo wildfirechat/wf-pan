@@ -130,10 +130,32 @@
         if (docEditor) { try { docEditor.destroyEditor(); } catch (e) { /* 忽略 */ } }
         $('editor').innerHTML = '<div id="ph"></div>';
         docEditor = new window.DocsAPI.DocEditor('ph', cfg);
+        cacheEditorAssets();
       });
     }).catch(function (e) {
       fatal(e.notInClient ? '请在客户端中打开' : e.message, !e.notInClient);
     });
+  }
+
+  /**
+   * 编辑器的脚本和字体（sdk-all.js、中文字体，压缩后二十多 MB）交给编辑器自带的 service worker 缓存。
+   * 电脑版编辑器（main/index.html）自己会注册它，手机版（mobile/index.html）不注册；
+   * 而 Android WebView 的 HTTP 缓存只有 20MB 左右装不下 ⇒ 手机上每次打开都整套重新下载。
+   * 注册在编辑器的版本目录（/docs/<版本>/）下，作用域覆盖编辑器 iframe；服务端升级换了版本目录时注销旧的。
+   */
+  function cacheEditorAssets() {
+    if (!('serviceWorker' in navigator)) return;   // iOS WKWebView 等不支持
+    var frame = $('editor').querySelector('iframe');
+    var m = frame && /^(.*\/)web-apps\//.exec(frame.src);
+    if (!m) return;
+    var name = 'document_editor_service_worker.js';
+    navigator.serviceWorker.register(m[1] + name).then(function (reg) {
+      return navigator.serviceWorker.getRegistrations().then(function (all) {
+        all.forEach(function (r) {
+          if (r.scope !== reg.scope && r.active && r.active.scriptURL.slice(-name.length) === name) r.unregister();
+        });
+      });
+    }).catch(function () { /* 没缓存也能用，只是慢 */ });
   }
 
   function download() {
