@@ -84,6 +84,13 @@
           onWarning: function (e) { ev('warning', e && e.data); },
           onInfo: function (e) { ev('info', e && e.data); }
         };
+        // 表格的拼写检查词典：编辑器按界面语言（zh-CN）找，没有中文词典就落到列表第一项（阿拉伯语）⇒
+        // 用户没选过时先给英语（美国，1033）。编辑器与本页同源（/docs 由 NG 反代），读的就是这里的 localStorage
+        if (cfg.documentType === 'cell') {
+          try {
+            if (!localStorage.getItem('sse-spellcheck-locale')) localStorage.setItem('sse-spellcheck-locale', '1033');
+          } catch (e) { /* 无痕模式等 */ }
+        }
         if (docEditor) { try { docEditor.destroyEditor(); } catch (e) { /* 忽略 */ } }
         $('editor').innerHTML = '<div id="ph"></div>';
         docEditor = new window.DocsAPI.DocEditor('ph', cfg);
