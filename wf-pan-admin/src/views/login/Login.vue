@@ -69,14 +69,11 @@ const handleLogin = async () => {
     await formRef.value.validate()
     loading.value = true
     
-    const success = await userStore.loginAction(form)
-    if (success) {
-      ElMessage.success('登录成功')
-      // 使用 window.location 跳转，确保路径正确
-      window.location.href = '/'
-    }
-  } catch (error) {
-    ElMessage.error(error.message || '登录失败')
+    await userStore.loginAction(form)
+    ElMessage.success('登录成功')
+    router.replace('/dashboard')
+  } catch {
+    // 表单校验失败或登录失败（错误信息已由请求拦截器提示）
   } finally {
     loading.value = false
   }

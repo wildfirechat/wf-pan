@@ -32,18 +32,15 @@ CREATE DATABASE wf_pan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ### 2. 配置
 
-编辑 `src/main/resources/application.yml`：
+编辑 `src/main/resources/application.properties`（生产环境建议使用外部配置文件覆盖）：
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/wf_pan?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: your_password
+```properties
+spring.datasource.url=jdbc:mysql://localhost:3306/wf_pan?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+spring.datasource.username=root
+spring.datasource.password=your_password
 
-im:
-  admin-url: http://localhost:18080
-  admin-secret: 123456
+im.server.admin_url=http://localhost:18080
+im.server.admin_secret=123456
 ```
 
 ### 3. 运行
@@ -53,13 +50,15 @@ mvn spring-boot:run
 ```
 
 服务启动后：
-- 管理后台：http://localhost:8080/admin/
+- 管理后台：http://localhost:8080/
 - 客户端 API：http://localhost:8081
 
-### 4. 默认管理员
+### 4. 初始管理员
 
 - 账号：admin
-- 密码：admin123
+- 密码：首次启动时随机生成并打印在日志中（仅一次），也可以通过 `pan.admin.initial-password` 预先指定
+- 登录后请立即修改密码；建议添加实际的 IM 用户为全局管理员（每个管理员有独立的登录密码）后删除 admin
+- 旧版本升级的实例：未设置个人密码的管理员仍使用原共享密码登录，修改密码后改用个人密码
 
 ## 完整构建（包含前端）
 
@@ -77,7 +76,7 @@ mvn clean package
 java -jar target/wf-pan-server-1.0.0.jar
 ```
 
-访问 http://localhost:8080/admin/ 打开管理后台。
+访问 http://localhost:8080/ 打开管理后台。
 
 ## API 文档
 
@@ -85,15 +84,15 @@ java -jar target/wf-pan-server-1.0.0.jar
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /admin/api/auth/login | 登录 |
-| POST | /admin/api/auth/logout | 退出 |
-| GET | /admin/api/dashboard/stats | 统计信息 |
-| GET | /admin/api/global-admins | 全局管理员列表 |
-| POST | /admin/api/global-admins | 添加管理员 |
-| DELETE | /admin/api/global-admins/{userId} | 移除管理员 |
-| GET | /admin/api/spaces | 空间列表 |
-| GET | /admin/api/spaces/{id}/files | 空间文件 |
-| GET | /admin/api/files | 全局搜索 |
+| POST | /api/auth/login | 登录 |
+| POST | /api/auth/logout | 退出 |
+| GET | /api/dashboard/stats | 统计信息 |
+| GET | /api/global-admins | 全局管理员列表 |
+| POST | /api/global-admins | 添加管理员 |
+| DELETE | /api/global-admins/{userId} | 移除管理员 |
+| GET | /api/spaces | 空间列表 |
+| GET | /api/spaces/{id}/files | 空间文件 |
+| GET | /api/files | 全局搜索 |
 
 ### 客户端端口 (8081)
 
@@ -124,6 +123,6 @@ java -jar target/wf-pan-server-1.0.0.jar
 ## 数据初始化
 
 应用启动时会自动创建表结构和初始化数据：
-1. 创建系统配置（管理员账号密码）
-2. 创建默认全局管理员（admin/admin123）
-3. 创建全局公共空间
+1. 没有任何管理员时创建初始管理员 admin（随机密码打印在日志中，或使用 `pan.admin.initial-password`）
+2. 创建全局公共空间
+3. 为旧数据回填文件的对象存储 key

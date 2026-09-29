@@ -4,98 +4,53 @@ import cn.wildfirechat.common.ErrorCode;
 import cn.wildfirechat.pojos.OutputApplicationUserInfo;
 import cn.wildfirechat.sdk.UserAdmin;
 import cn.wildfirechat.sdk.model.IMResult;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 
 @Service
 @Slf4j
 public class ClientAuthService {
-    
-    // 简单的本地缓存，生产环境建议使用 Redis
-    private final ConcurrentHashMap<String, AuthCacheEntry> authCache = new ConcurrentHashMap<>();
-    
-    // 缓存有效期 5 分钟
-    private static final long CACHE_TTL_MS = 5 * 60 * 1000;
-    
+
+    // 只缓存验证成功的 authCode；单机缓存，多实例部署时各自缓存
+    private final Cache<String, String> authCache = Caffeine.newBuilder()
+        .expireAfterWrite(Duration.ofMinutes(5))
+        .maximumSize(100_000)
+        .build();
+
     /**
-     * 验证 authCode 并返回 userId
-     * 使用野火IM SDK验证
+     * 验证 authCode 并返回 userId，无效时返回 null
      */
     public String validateAuthCode(String authCode) {
         if (authCode == null || authCode.isEmpty()) {
             return null;
         }
-        
-        // 1. 检查缓存
-        AuthCacheEntry cached = authCache.get(authCode);
-        if (cached != null && !cached.isExpired()) {
-            log.debug("Auth code validated from cache");
-            return cached.getUserId();
+
+        String userId = authCache.getIfPresent(authCode);
+        if (userId == null) {
+            userId = validateWithIMServer(authCode);
+            if (userId != null) {
+                authCache.put(authCode, userId);
+            }
         }
-        
-        // 2. 使用野火IM SDK验证
-        String userId = validateWithIMServer(authCode);
-        
-        if (userId != null) {
-            // 缓存结果
-            authCache.put(authCode, new AuthCacheEntry(userId, System.currentTimeMillis()));
-        }
-        
         return userId;
     }
-    
-    /**
-     * 使用野火IM SDK验证 authCode
-     */
+
+    // authCode 本身就是用户凭证，任何情况下都不要写进日志
     private String validateWithIMServer(String authCode) {
-        log.info("Validating authCode with IM SDK, authCode: {}", authCode);
         try {
             IMResult<OutputApplicationUserInfo> imResult = UserAdmin.applicationGetUserInfo(authCode);
-            if (imResult != null && imResult.getErrorCode() == ErrorCode.ERROR_CODE_SUCCESS) {
-                String userId = imResult.getResult().getUserId();
-                log.info("Auth code validated, userId: {}", userId);
-                return userId;
-            } else {
-                log.warn("Invalid authCode, errorCode: {}", imResult != null ? imResult.getErrorCode() : "null");
+            if (imResult != null && imResult.getErrorCode() == ErrorCode.ERROR_CODE_SUCCESS
+                    && imResult.getResult() != null) {
+                return imResult.getResult().getUserId();
             }
+            log.warn("AuthCode rejected by IM server, errorCode: {}", imResult != null ? imResult.getErrorCode() : null);
         } catch (Exception e) {
-            log.error("Failed to validate authCode with IM SDK", e);
+            log.error("Failed to validate authCode with IM server", e);
         }
         return null;
-    }
-    
-    /**
-     * 清理过期的缓存
-     */
-    public void cleanExpiredCache() {
-        long now = System.currentTimeMillis();
-        authCache.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
-    }
-    
-    /**
-     * 缓存条目
-     */
-    private static class AuthCacheEntry {
-        private final String userId;
-        private final long timestamp;
-        
-        AuthCacheEntry(String userId, long timestamp) {
-            this.userId = userId;
-            this.timestamp = timestamp;
-        }
-        
-        String getUserId() {
-            return userId;
-        }
-        
-        boolean isExpired() {
-            return isExpired(System.currentTimeMillis());
-        }
-        
-        boolean isExpired(long now) {
-            return (now - timestamp) > CACHE_TTL_MS;
-        }
     }
 }

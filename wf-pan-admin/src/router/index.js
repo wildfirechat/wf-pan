@@ -11,6 +11,7 @@ const routes = [
     path: '/',
     name: 'Layout',
     component: () => import('../components/MainLayout.vue'),
+    redirect: '/dashboard',
     children: [
       {
         path: 'dashboard',
@@ -61,29 +62,15 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to) => {
+  if (to.path === '/login') {
+    return true
+  }
   const userStore = useUserStore()
-  
-  // 未登录时可以访问的页面
-  if (to.path === '/login' || to.path === '/') {
-    next()
-    return
+  if (!userStore.isLoggedIn || !(await userStore.ensureSession())) {
+    return '/login'
   }
-  
-  if (!userStore.isLoggedIn) {
-    next('/')
-    return
-  }
-  
-  // 验证 session 是否有效
-  const valid = await userStore.fetchUserInfo()
-  if (!valid) {
-    userStore.logout()
-    next('/login')
-    return
-  }
-  
-  next()
+  return true
 })
 
 export default router

@@ -1,19 +1,21 @@
 package com.wildfirechat.pan.config;
 
 import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StringUtils;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * 多厂商OSS配置类
- * 
- * media_type: 0=未配置, 1=七牛云, 2=阿里云, 3=野火私有, 4=对象存储网关, 
+ *
+ * media_type: 0=未配置, 1=七牛云, 2=阿里云, 3=野火私有, 4=对象存储网关,
  *             5=腾讯云, 6=华为云, 7=AWS S3, 8=京东云
  */
 @Configuration
 @Data
-@Slf4j
 public class OssConfig {
 
     public static final int TYPE_NONE = 0;
@@ -41,8 +43,12 @@ public class OssConfig {
     @Value("${media.bucket:}")
     private String bucket;
 
-    @Value("${media.region:}")
-    private String region;
+    /**
+     * 除网盘 bucket 外，允许客户端引用或复制（copy=true）的 URL 前缀，逗号分隔，
+     * 如 IM 文件消息所在 bucket：http://minio.example.com:9000/media/
+     */
+    @Value("${media.trusted_url_prefixes:}")
+    private String trustedUrlPrefixes;
 
     // 阿里云特有配置
     @Value("${media.aliyun.endpoint:}")
@@ -64,13 +70,13 @@ public class OssConfig {
     @Value("${media.jdcloud.endpoint:}")
     private String jdcloudEndpoint;
 
-    // 七牛云特有配置
-    @Value("${media.qiniu.region:z0}")
-    private String qiniuRegion;
+    public List<String> getTrustedUrlPrefixList() {
+        return Arrays.stream(StringUtils.commaDelimitedListToStringArray(trustedUrlPrefixes))
+            .map(String::trim)
+            .filter(StringUtils::hasText)
+            .toList();
+    }
 
-    /**
-     * 获取媒体类型名称
-     */
     public String getMediaTypeName() {
         return switch (mediaType) {
             case TYPE_NONE -> "未配置";
@@ -84,25 +90,5 @@ public class OssConfig {
             case TYPE_JDCLOUD -> "京东云OSS";
             default -> "未知";
         };
-    }
-
-    /**
-     * 是否为MinIO兼容类型（野火私有、对象存储网关）
-     */
-    public boolean isMinioCompatible() {
-        return mediaType == TYPE_WILDFIRE || mediaType == TYPE_GATEWAY;
-    }
-
-    /**
-     * 检查OSS配置是否有效
-     */
-    public boolean isValid() {
-        if (mediaType == TYPE_NONE) {
-            return false;
-        }
-        return serverUrl != null && !serverUrl.isEmpty() &&
-               accessKey != null && !accessKey.isEmpty() &&
-               secretKey != null && !secretKey.isEmpty() &&
-               bucket != null && !bucket.isEmpty();
     }
 }

@@ -33,6 +33,9 @@
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="可选，用于显示" />
         </el-form-item>
+        <el-form-item label="登录密码" prop="password">
+          <el-input v-model="form.password" type="password" show-password placeholder="该管理员登录后台使用" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -55,11 +58,16 @@ const formRef = ref()
 
 const form = ref({
   userId: '',
-  username: ''
+  username: '',
+  password: ''
 })
 
 const rules = {
-  userId: [{ required: true, message: '请输入用户ID', trigger: 'blur' }]
+  userId: [{ required: true, message: '请输入用户ID', trigger: 'blur' }],
+  password: [
+    { required: true, message: '请输入登录密码', trigger: 'blur' },
+    { min: 8, max: 64, message: '密码长度需为8-64位', trigger: 'blur' }
+  ]
 }
 
 const fetchAdmins = async () => {
@@ -75,7 +83,7 @@ const fetchAdmins = async () => {
 }
 
 const showAddDialog = () => {
-  form.value = { userId: '', username: '' }
+  form.value = { userId: '', username: '', password: '' }
   dialogVisible.value = true
 }
 

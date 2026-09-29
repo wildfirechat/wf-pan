@@ -1,106 +1,79 @@
 package com.wildfirechat.pan.filter;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wildfirechat.pan.dto.Result;
-import jakarta.servlet.*;
+import com.wildfirechat.pan.repository.PanGlobalAdminRepository;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+/**
+ * 管理端口的访问控制：
+ * <ul>
+ *     <li>禁止访问客户端接口 /api/v1/**</li>
+ *     <li>除登录接口外，/api/** 需要有效的管理员会话，且该管理员仍在全局管理员列表中</li>
+ *     <li>其余路径（管理后台前端页面和静态资源）放行</li>
+ * </ul>
+ */
 @Component
 @Slf4j
-public class AdminAuthFilter implements Filter {
-    @Value("${server.admin-port:8080}")
-    private int admin_port;
+public class AdminAuthFilter extends OncePerRequestFilter {
 
     public static final String ADMIN_SESSION_KEY = "admin_user";
-    
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    
+
+    private static final String LOGIN_PATH = "/api/auth/login";
+
+    private final int adminPort;
+    private final PanGlobalAdminRepository globalAdminRepository;
+
+    public AdminAuthFilter(@Value("${server.admin-port:8080}") int adminPort,
+                           PanGlobalAdminRepository globalAdminRepository) {
+        this.adminPort = adminPort;
+        this.globalAdminRepository = globalAdminRepository;
+    }
+
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
-            throws IOException, ServletException {
-        
-        HttpServletRequest httpRequest = (HttpServletRequest) request;
-        HttpServletResponse httpResponse = (HttpServletResponse) response;
-        
-        // 获取请求端口
-        int serverPort = request.getLocalPort();
-        String uri = httpRequest.getRequestURI();
-        
-        // 严格端口隔离：管理端口禁止访问客户端 API
-        if (serverPort == admin_port) {
-            if (isClientApi(uri)) {
-                log.warn("Admin port {} attempted to access client API: {}", serverPort, uri);
-                writeErrorResponse(httpResponse, 403, "客户端接口不允许从管理端口访问");
-                return;
-            }
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getLocalPort() != adminPort;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        String path = FilterSupport.path(request);
+
+        if (path.startsWith(FilterSupport.CLIENT_API_PREFIX)) {
+            log.warn("Client API requested on admin port: {}", path);
+            FilterSupport.writeError(response, HttpServletResponse.SC_FORBIDDEN, 403, "客户端接口不允许从管理端口访问");
+            return;
         }
-        
-        // 只允许管理端口的请求进入管理接口
-        if (serverPort != admin_port) {
+
+        if (!path.startsWith(FilterSupport.API_PREFIX) || path.equals(LOGIN_PATH)) {
             chain.doFilter(request, response);
             return;
         }
-        
-        // 登录相关接口放行
-        if (uri.equals("/api/auth/login") || uri.equals("/api/auth/status")) {
-            chain.doFilter(request, response);
+
+        HttpSession session = request.getSession(false);
+        String adminUser = session == null ? null : (String) session.getAttribute(ADMIN_SESSION_KEY);
+        if (adminUser == null) {
+            FilterSupport.writeError(response, HttpServletResponse.SC_UNAUTHORIZED, 401, "未登录或会话已过期");
             return;
         }
-        
-        // 静态资源放行（assets目录下的文件）
-        if (uri.startsWith("/assets/")) {
-            chain.doFilter(request, response);
+
+        // 管理员被移除后立即失效，而不是等会话过期
+        if (!globalAdminRepository.existsByUserId(adminUser)) {
+            log.warn("Session of removed admin rejected: {}", adminUser);
+            session.invalidate();
+            FilterSupport.writeError(response, HttpServletResponse.SC_UNAUTHORIZED, 401, "管理员账号已失效");
             return;
         }
-        
-        // 前端页面和路由放行（让前端处理权限判断）
-        // API 接口需要认证，其他都放行
-        if (!uri.startsWith("/api/")) {
-            chain.doFilter(request, response);
-            return;
-        }
-        
-        // 检查 session
-        HttpSession session = httpRequest.getSession(false);
-        if (session == null || session.getAttribute(ADMIN_SESSION_KEY) == null) {
-            log.warn("Admin access denied: {}, port: {}", uri, serverPort);
-            writeErrorResponse(httpResponse, "未登录或会话已过期");
-            return;
-        }
-        
+
         chain.doFilter(request, response);
-    }
-    
-    private void writeErrorResponse(HttpServletResponse response, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        response.setContentType("application/json;charset=UTF-8");
-        Result<Void> result = Result.error(401, message);
-        response.getWriter().write(objectMapper.writeValueAsString(result));
-    }
-    
-    private void writeErrorResponse(HttpServletResponse response, int code, String message) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        response.setContentType("application/json;charset=UTF-8");
-        Result<Void> result = Result.error(code, message);
-        response.getWriter().write(objectMapper.writeValueAsString(result));
-    }
-    
-    /**
-     * 判断是否是客户端 API
-     */
-    private boolean isClientApi(String uri) {
-        // 客户端 API 路径是 /api/v1/*
-        if (uri.startsWith("/api/v1/")) {
-            return true;
-        }
-        return false;
     }
 }

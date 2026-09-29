@@ -6,123 +6,78 @@ import com.wildfirechat.pan.entity.PanSpace;
 import com.wildfirechat.pan.repository.PanGlobalAdminRepository;
 import com.wildfirechat.pan.repository.PanSpaceAdminRepository;
 import com.wildfirechat.pan.repository.PanSpaceRepository;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+/**
+ * 客户端用户（IM userId）对空间和文件的权限判断。
+ * 管理后台不是 IM 用户，使用 {@link #canConsoleAccessSpace(PanSpace)}。
+ */
 @Service
-@Slf4j
+@RequiredArgsConstructor
 public class PermissionService {
-    
-    @Autowired
-    private PanSpaceRepository spaceRepository;
-    
-    @Autowired
-    private PanSpaceAdminRepository spaceAdminRepository;
-    
-    @Autowired
-    private PanGlobalAdminRepository globalAdminRepository;
-    
-    @Autowired
-    private ConfigService configService;
-    
-    /**
-     * 判断管理员是否可以访问/管理用户私有空间
-     * 根据配置 admin.manage.private.space 决定
-     * 
-     * 注意：此方法用于管理后台，userId 为 "admin" 表示管理后台请求
-     */
-    public boolean canAdminAccessPrivateSpace(String userId) {
-        // "admin" 是管理后台的特殊标识
-        if ("admin".equals(userId)) {
-            return configService.isAdminCanManagePrivateSpace();
-        }
-        // 其他情况，首先必须是全局管理员
-        if (!isGlobalAdmin(userId)) {
-            return false;
-        }
-        // 然后检查配置是否允许
-        return configService.isAdminCanManagePrivateSpace();
-    }
-    
-    /**
-     * 判断是否是全局管理员
-     */
+
+    private final PanSpaceRepository spaceRepository;
+    private final PanSpaceAdminRepository spaceAdminRepository;
+    private final PanGlobalAdminRepository globalAdminRepository;
+    private final ConfigService configService;
+
     public boolean isGlobalAdmin(String userId) {
         return globalAdminRepository.existsByUserId(userId);
     }
-    
+
     /**
-     * 判断用户是否有权限访问空间
+     * 管理后台是否可以访问该空间：用户私有空间受配置 pan.admin.manage-private-space 控制
      */
+    public boolean canConsoleAccessSpace(PanSpace space) {
+        return space.getSpaceType() != SpaceType.USER_PRIVATE || configService.isAdminCanManagePrivateSpace();
+    }
+
     public boolean canAccessSpace(String userId, Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space == null) return false;
-        
-        switch (space.getSpaceType()) {
-            case GLOBAL_PUBLIC:
-            case USER_PUBLIC:
-                return true;
-            
-            case USER_PRIVATE:
-                // 空间所有者可以访问
-                if (space.getOwnerId().equals(userId)) {
-                    return true;
-                }
-                // 管理员根据配置决定是否可以访问
-                return canAdminAccessPrivateSpace(userId);
-            
-            default:
-                return false;
-        }
+        return spaceRepository.findById(spaceId).map(space -> canAccessSpace(userId, space)).orElse(false);
     }
-    
-    /**
-     * 判断用户是否有权限管理空间
-     */
+
+    public boolean canAccessSpace(String userId, PanSpace space) {
+        return switch (space.getSpaceType()) {
+            case GLOBAL_PUBLIC, USER_PUBLIC -> true;
+            case USER_PRIVATE -> isOwner(userId, space) || canGlobalAdminAccessPrivateSpace(userId);
+        };
+    }
+
     public boolean canManageSpace(String userId, Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space == null) return false;
-        
-        // 检查是否是空间管理员
-        boolean isSpaceAdmin = spaceAdminRepository.existsBySpaceIdAndUserId(spaceId, userId);
-        if (isSpaceAdmin) return true;
-        
-        switch (space.getSpaceType()) {
-            case GLOBAL_PUBLIC:
-                return isGlobalAdmin(userId);
-            
-            case USER_PUBLIC:
-                return space.getOwnerId().equals(userId);
-            
-            case USER_PRIVATE:
-                // 空间所有者可以管理
-                if (space.getOwnerId().equals(userId)) {
-                    return true;
-                }
-                // 管理员根据配置决定是否可以管理
-                return canAdminAccessPrivateSpace(userId);
-            
-            default:
-                return false;
-        }
+        return spaceRepository.findById(spaceId).map(space -> canManageSpace(userId, space)).orElse(false);
     }
-    
+
+    public boolean canManageSpace(String userId, PanSpace space) {
+        if (spaceAdminRepository.existsBySpaceIdAndUserId(space.getId(), userId)) {
+            return true;
+        }
+        return switch (space.getSpaceType()) {
+            case GLOBAL_PUBLIC -> isGlobalAdmin(userId);
+            case USER_PUBLIC -> isOwner(userId, space);
+            case USER_PRIVATE -> isOwner(userId, space) || canGlobalAdminAccessPrivateSpace(userId);
+        };
+    }
+
     /**
-     * 判断用户是否可以删除文件
+     * 空间管理者、文件创建者可以删除；全局管理员可以删除非私有空间中的任何文件
      */
     public boolean canDeleteFile(String userId, PanFile file) {
-        // 全局管理员可以删除任何文件
-        if (isGlobalAdmin(userId)) {
+        PanSpace space = spaceRepository.findById(file.getSpaceId()).orElse(null);
+        if (space == null) {
+            return false;
+        }
+        if (userId.equals(file.getCreatorId()) || canManageSpace(userId, space)) {
             return true;
         }
-        
-        // 文件创建者可以删除
-        if (file.getCreatorId().equals(userId)) {
-            return true;
-        }
-        
-        // 空间管理员可以删除
-        return canManageSpace(userId, file.getSpaceId());
+        return space.getSpaceType() != SpaceType.USER_PRIVATE && isGlobalAdmin(userId);
+    }
+
+    private boolean canGlobalAdminAccessPrivateSpace(String userId) {
+        return configService.isAdminCanManagePrivateSpace() && isGlobalAdmin(userId);
+    }
+
+    private static boolean isOwner(String userId, PanSpace space) {
+        return userId.equals(space.getOwnerId());
     }
 }

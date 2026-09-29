@@ -13,21 +13,12 @@ import java.time.LocalDateTime;
 
 @Repository
 public interface PanOperationLogRepository extends JpaRepository<PanOperationLog, Long> {
-    
+
     Page<PanOperationLog> findAllByOrderByCreatedAtDesc(Pageable pageable);
-    
+
     Page<PanOperationLog> findByUserIdOrderByCreatedAtDesc(String userId, Pageable pageable);
-    
-    Page<PanOperationLog> findByOperationOrderByCreatedAtDesc(String operation, Pageable pageable);
-    
-    @Query("SELECT l FROM PanOperationLog l WHERE l.createdAt >= :startTime ORDER BY l.createdAt DESC")
-    Page<PanOperationLog> findByCreatedAtAfterOrderByCreatedAtDesc(@Param("startTime") LocalDateTime startTime, Pageable pageable);
-    
+
     @Modifying
     @Query("DELETE FROM PanOperationLog l WHERE l.createdAt < :beforeTime")
     int deleteByCreatedAtBefore(@Param("beforeTime") LocalDateTime beforeTime);
-    
-    @Modifying
-    @Query("DELETE FROM PanOperationLog l WHERE l.id IN (SELECT l2.id FROM PanOperationLog l2 ORDER BY l2.createdAt DESC OFFSET :keepCount)")
-    int deleteOldLogsKeepRecent(@Param("keepCount") long keepCount);
 }

@@ -1,7 +1,5 @@
 <template>
-  <!-- 未登录时显示登录页面 -->
-  <LoginView v-if="!userStore.isLoggedIn" />
-  <el-container v-else class="layout-container">
+  <el-container class="layout-container">
     <!-- 侧边栏 -->
     <el-aside width="200px" class="aside">
       <div class="logo">
@@ -73,22 +71,12 @@
 </template>
 
 <script setup>
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '../store/user'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { onMounted } from 'vue'
-import LoginView from '../views/login/Login.vue'
 
 const router = useRouter()
-const route = useRoute()
 const userStore = useUserStore()
-
-// 登录后，如果在根路径，自动跳转到 dashboard
-onMounted(() => {
-  if (userStore.isLoggedIn && route.path === '/') {
-    router.replace('/dashboard')
-  }
-})
 
 const handleCommand = async (command) => {
   if (command === 'changePassword') {
@@ -100,12 +88,12 @@ const handleCommand = async (command) => {
         cancelButtonText: '取消',
         type: 'warning'
       })
-      userStore.logout()
-      window.location.href = '/'
-      ElMessage.success('已退出登录')
     } catch {
-      // 取消
+      return // 取消
     }
+    await userStore.logout()
+    ElMessage.success('已退出登录')
+    router.push('/login')
   }
 }
 </script>

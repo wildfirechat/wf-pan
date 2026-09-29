@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/dashboard")
@@ -36,8 +36,7 @@ public class AdminDashboardController {
         long totalStorageUsed = fileRepository.sumFileSize();
         
         // 统计今日上传数
-        LocalDateTime today = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
-        long todayUploads = fileRepository.countTodayUploads(today);
+        long todayUploads = fileRepository.countTodayUploads(LocalDate.now().atStartOfDay());
         
         DashboardStatsVO stats = DashboardStatsVO.builder()
             .totalUsers(totalUsers)

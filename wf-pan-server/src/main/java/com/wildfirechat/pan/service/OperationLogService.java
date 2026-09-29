@@ -1,32 +1,29 @@
 package com.wildfirechat.pan.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wildfirechat.pan.entity.PanOperationLog;
 import com.wildfirechat.pan.repository.PanOperationLogRepository;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.Map;
 
 @Service
 @Slf4j
 public class OperationLogService {
-    
-    @Autowired
-    private PanOperationLogRepository logRepository;
-    
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    
+
     // 操作类型常量
     public static final String OP_CREATE_FOLDER = "CREATE_FOLDER";
     public static final String OP_UPLOAD_FILE = "UPLOAD_FILE";
@@ -38,83 +35,67 @@ public class OperationLogService {
     public static final String OP_LOGIN = "LOGIN";
     public static final String OP_LOGOUT = "LOGOUT";
     public static final String OP_CHANGE_PASSWORD = "CHANGE_PASSWORD";
-    
+
     // 目标类型常量
     public static final String TARGET_FILE = "FILE";
     public static final String TARGET_FOLDER = "FOLDER";
-    public static final String TARGET_SPACE = "SPACE";
-    
+
+    private final PanOperationLogRepository logRepository;
+    private final TransactionTemplate requiresNew;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public OperationLogService(PanOperationLogRepository logRepository, PlatformTransactionManager transactionManager) {
+        this.logRepository = logRepository;
+        this.requiresNew = new TransactionTemplate(transactionManager);
+        this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
+
     /**
-     * 记录操作日志
+     * 记录操作日志。在事务中调用时，事务提交后才写入（回滚的操作不留日志）；
+     * 写日志失败只记录错误，不影响业务。
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void log(String userId, String operation, String targetType, Long targetId, 
+    public void log(String userId, String operation, String targetType, Long targetId,
                     Long spaceId, Object details) {
-        try {
-            PanOperationLog operationLog = new PanOperationLog();
-            operationLog.setUserId(userId);
-            operationLog.setOperation(operation);
-            operationLog.setTargetType(targetType);
-            operationLog.setTargetId(targetId);
-            operationLog.setSpaceId(spaceId);
-            operationLog.setCreatedAt(LocalDateTime.now());
-            
-            // 获取IP地址
-            String ipAddress = getClientIpAddress();
-            operationLog.setIpAddress(ipAddress);
-            
-            // 转换details为JSON
-            if (details != null) {
-                if (details instanceof String) {
-                    operationLog.setDetails((String) details);
-                } else {
-                    operationLog.setDetails(objectMapper.writeValueAsString(details));
+        PanOperationLog entry = new PanOperationLog();
+        entry.setUserId(userId);
+        entry.setOperation(operation);
+        entry.setTargetType(targetType);
+        entry.setTargetId(targetId);
+        entry.setSpaceId(spaceId);
+        entry.setCreatedAt(LocalDateTime.now());
+        entry.setIpAddress(getClientIpAddress());
+        entry.setDetails(toJson(details));
+
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    save(entry);
                 }
-            }
-            
-            logRepository.save(operationLog);
-            log.debug("Operation logged: {} - {} - {}", userId, operation, targetId);
-        } catch (Exception e) {
-            log.error("Failed to log operation", e);
+            });
+        } else {
+            save(entry);
         }
     }
-    
-    /**
-     * 简化的日志记录方法
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+
     public void log(String userId, String operation, String description) {
-        Map<String, Object> details = new HashMap<>();
-        details.put("description", description);
-        log(userId, operation, null, null, null, details);
+        log(userId, operation, null, null, null, Map.of("description", description));
     }
-    
-    /**
-     * 查询日志列表
-     */
+
     public Page<PanOperationLog> findLogs(Pageable pageable) {
         return logRepository.findAllByOrderByCreatedAtDesc(pageable);
     }
-    
-    /**
-     * 根据用户查询日志
-     */
+
     public Page<PanOperationLog> findLogsByUser(String userId, Pageable pageable) {
         return logRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
     }
-    
-    /**
-     * 清空所有日志
-     */
+
     @Transactional
     public void clearAllLogs() {
-        logRepository.deleteAll();
+        logRepository.deleteAllInBatch();
         log.info("All operation logs cleared");
     }
-    
-    /**
-     * 清理指定天数前的日志
-     */
+
     @Transactional
     public int clearLogsBeforeDays(int days) {
         LocalDateTime beforeTime = LocalDateTime.now().minusDays(days);
@@ -122,33 +103,34 @@ public class OperationLogService {
         log.info("Cleared {} logs before {}", deleted, beforeTime);
         return deleted;
     }
-    
-    /**
-     * 获取客户端IP地址
-     */
-    private String getClientIpAddress() {
+
+    private void save(PanOperationLog entry) {
         try {
-            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-            if (attributes != null) {
-                HttpServletRequest request = attributes.getRequest();
-                String ip = request.getHeader("X-Forwarded-For");
-                if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                    ip = request.getHeader("Proxy-Client-IP");
-                }
-                if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                    ip = request.getHeader("WL-Proxy-Client-IP");
-                }
-                if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-                    ip = request.getRemoteAddr();
-                }
-                // 多个代理情况，取第一个IP
-                if (ip != null && ip.contains(",")) {
-                    ip = ip.split(",")[0].trim();
-                }
-                return ip;
-            }
+            requiresNew.executeWithoutResult(status -> logRepository.save(entry));
         } catch (Exception e) {
-            log.error("Failed to get client IP", e);
+            log.error("Failed to save operation log: {} - {}", entry.getUserId(), entry.getOperation(), e);
+        }
+    }
+
+    private String toJson(Object details) {
+        if (details == null || details instanceof String) {
+            return (String) details;
+        }
+        try {
+            return objectMapper.writeValueAsString(details);
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to serialize log details", e);
+            return null;
+        }
+    }
+
+    /**
+     * 客户端 IP。反向代理头由容器按 server.forward-headers-strategy 处理（只信任内网代理），
+     * 这里不能直接读 X-Forwarded-For，否则客户端可以伪造。
+     */
+    private static String getClientIpAddress() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return attributes.getRequest().getRemoteAddr();
         }
         return null;
     }

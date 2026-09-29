@@ -82,7 +82,7 @@ const rules = {
   ],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码长度不能少于6位', trigger: 'blur' }
+    { min: 8, max: 64, message: '密码长度需为8-64位', trigger: 'blur' }
   ],
   confirmPassword: [
     { required: true, message: '请再次输入新密码', trigger: 'blur' },
@@ -103,8 +103,7 @@ const handleSubmit = async () => {
     
     if (res.code === 0) {
       ElMessage.success('密码修改成功，请重新登录')
-      // 退出登录
-      userStore.logout()
+      await userStore.logout()
       router.push('/login')
     }
   } catch (error) {

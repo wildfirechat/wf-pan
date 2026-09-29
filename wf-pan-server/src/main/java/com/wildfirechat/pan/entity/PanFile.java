@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "pan_file", 
     indexes = {
-        @Index(name = "idx_storage_url_deleted", columnList = "storage_url, is_deleted"),
+        @Index(name = "idx_storage_key_deleted", columnList = "storage_key, is_deleted"),
         @Index(name = "idx_space_parent", columnList = "space_id, parent_id, is_deleted"),
         @Index(name = "idx_parent_id", columnList = "parent_id, is_deleted")
     })
@@ -45,7 +45,14 @@ public class PanFile {
     
     @Column(name = "storage_url", length = 760)
     private String storageUrl;
-    
+
+    /**
+     * 网盘 bucket 中的对象 key，用于统计引用数和删除对象。
+     * 空串表示对象不在网盘 bucket 中（不归网盘管理）；null 表示旧数据尚未回填
+     */
+    @Column(name = "storage_key", length = 760)
+    private String storageKey;
+
     @Column(name = "child_count")
     private Integer childCount = 0;
     

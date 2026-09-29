@@ -31,14 +31,12 @@ wf-pan/
 
 ### 1. 配置数据库
 
-编辑 `wf-pan-server/src/main/resources/application.yml`：
+编辑 `wf-pan-server/src/main/resources/application.properties`（生产环境建议使用外部配置文件覆盖）：
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/wf_pan?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: your_password
+```properties
+spring.datasource.url=jdbc:mysql://localhost:3306/wf_pan?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+spring.datasource.username=root
+spring.datasource.password=your_password
 ```
 
 创建数据库：
@@ -48,10 +46,9 @@ CREATE DATABASE wf_pan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ### 2. 配置 IM 服务
 
-```yaml
-im:
-  admin-url: http://localhost:18080
-  admin-secret: 123456
+```properties
+im.server.admin_url=http://localhost:18080
+im.server.admin_secret=123456
 ```
 
 ### 3. 配置对象存储（可选）
@@ -62,12 +59,21 @@ im:
 # 媒体存储配置
 # 1: 七牛云存储, 2: 阿里云对象存储, 3: 野火私有对象存储, 4: 对象存储网关
 # 5: 腾讯云存储, 6: 华为云存储, 7: AWS S3, 8: 京东云存储
-media.type=4
+media.type=3
 media.server_url=http://localhost:9000
 media.access_key=minioadmin
 media.secret_key=minioadmin
 media.bucket=wf-pan
 ```
+
+保存 IM 文件消息到网盘（`copy=true`）时，服务端只会从受信任的地址复制文件，
+需要把 IM 文件所在 bucket 的访问地址配置为受信任前缀（逗号分隔）：
+
+```properties
+media.trusted_url_prefixes=http://localhost:9000/media/
+```
+
+客户端提交的存储地址必须位于网盘 bucket 或受信任前缀之下；服务端只删除网盘 bucket 中的对象。
 
 **厂商配置示例：**
 
@@ -99,12 +105,14 @@ java -jar target/wf-pan-server-1.0.0.jar
 
 ### 5. 访问服务
 
-- 管理后台：http://localhost:8080/admin/
+- 管理后台：http://localhost:8080/
 - 客户端 API：http://localhost:8081
 
-默认管理员：
+初始管理员：
 - 账号：admin
-- 密码：admin123
+- 密码：首次启动时随机生成并打印在日志中（仅一次），也可以通过 `pan.admin.initial-password` 预先指定
+- 登录后请立即修改密码；建议添加实际的 IM 用户为全局管理员（每个管理员有独立的登录密码）后删除 admin
+- 旧版本升级的实例：未设置个人密码的管理员仍使用原共享密码登录，修改密码后改用个人密码
 
 ## 核心功能
 
@@ -112,7 +120,7 @@ java -jar target/wf-pan-server-1.0.0.jar
 
 - **GLOBAL_PUBLIC**: 全局公共空间，所有人可读，全局管理员可写
 - **USER_PUBLIC**: 用户公共空间，所有人可读，用户自己可管理
-- **USER_PRIVATE**: 用户私有空间，仅自己可访问
+- **USER_PRIVATE**: 用户私有空间，仅自己可访问（`pan.admin.manage-private-space=true` 时管理员也可访问，默认关闭）
 - **DEPT_PUBLIC/DEPT_PRIVATE**: 部门空间（预留）
 
 ### 权限控制
@@ -165,9 +173,8 @@ java -jar target/wf-pan-server-1.0.0.jar
 
 应用启动时会自动：
 1. 创建数据库表（`spring.jpa.hibernate.ddl-auto: update`）
-2. 初始化系统配置（管理员账号密码）
-3. 创建默认全局管理员（admin/admin123）
-4. 创建全局公共空间
+2. 没有任何管理员时创建初始管理员 admin（密码见上文）
+3. 创建全局公共空间
 
 ## 开发模式
 

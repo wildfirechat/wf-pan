@@ -126,7 +126,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getSpaceFiles, getSpaces } from '../../api/space'
+import { getSpaceFiles, getSpace } from '../../api/space'
 import { getAllFiles, searchFiles, deleteFile, getFileDownloadUrl } from '../../api/file'
 import { getUserInfo } from '../../api/user'
 import UserInfoDialog from '../../components/UserInfoDialog.vue'
@@ -184,14 +184,8 @@ const loadSpaceInfo = async (spaceId) => {
     return
   }
   try {
-    const res = await getSpaces({ type: '', page: 0, size: 1000 })
-    if (res.code === 0) {
-      const spaces = res.data.content || res.data
-      const space = spaces.find(s => s.id === spaceId)
-      if (space) {
-        currentSpaceName.value = space.name
-      }
-    }
+    const res = await getSpace(spaceId)
+    currentSpaceName.value = res.data.name
   } catch (error) {
     console.error('加载空间信息失败:', error)
   }
@@ -302,8 +296,9 @@ const handleFileClick = (row) => {
 const handleDownload = async (row) => {
   try {
     const res = await getFileDownloadUrl(row.id)
-    if (res.code === 0 && res.data) {
-      window.open(res.data, '_blank')
+    // 只打开 http(s) 地址，防止 javascript: 等链接在后台页面中执行
+    if (/^https?:\/\//i.test(res.data || '')) {
+      window.open(res.data, '_blank', 'noopener')
     } else {
       ElMessage.error('获取下载链接失败')
     }

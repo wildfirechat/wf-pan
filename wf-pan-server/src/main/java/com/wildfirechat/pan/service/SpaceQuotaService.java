@@ -1,76 +1,41 @@
 package com.wildfirechat.pan.service;
 
-import com.wildfirechat.pan.entity.PanSpace;
+import com.wildfirechat.pan.exception.BusinessException;
 import com.wildfirechat.pan.repository.PanSpaceRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 空间配额与计数。全部使用原子 UPDATE，避免并发时读-改-写丢失更新。
+ */
 @Service
+@RequiredArgsConstructor
 public class SpaceQuotaService {
-    
-    @Autowired
-    private PanSpaceRepository spaceRepository;
-    
+
+    private final PanSpaceRepository spaceRepository;
+
+    /**
+     * 占用配额，超出总配额时抛出异常
+     */
     @Transactional
-    public void increaseUsedQuota(Long spaceId, Long size) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            space.setUsedQuota(space.getUsedQuota() + size);
-            spaceRepository.save(space);
+    public void reserve(Long spaceId, long size, String errorMessage) {
+        if (size > 0 && spaceRepository.tryIncreaseUsedQuota(spaceId, size) == 0) {
+            throw new BusinessException(errorMessage);
         }
     }
-    
+
     @Transactional
-    public void decreaseUsedQuota(Long spaceId, Long size) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            long newQuota = space.getUsedQuota() - size;
-            space.setUsedQuota(Math.max(0, newQuota));
-            spaceRepository.save(space);
+    public void release(Long spaceId, long size) {
+        if (size > 0) {
+            spaceRepository.decreaseUsedQuota(spaceId, size);
         }
     }
-    
+
     @Transactional
-    public void incrementFileCount(Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            space.setFileCount(space.getFileCount() + 1);
-            spaceRepository.save(space);
+    public void adjustCounts(Long spaceId, int files, int folders) {
+        if (files != 0 || folders != 0) {
+            spaceRepository.adjustCounts(spaceId, files, folders);
         }
-    }
-    
-    @Transactional
-    public void decrementFileCount(Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            space.setFileCount(Math.max(0, space.getFileCount() - 1));
-            spaceRepository.save(space);
-        }
-    }
-    
-    @Transactional
-    public void incrementFolderCount(Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            space.setFolderCount(space.getFolderCount() + 1);
-            spaceRepository.save(space);
-        }
-    }
-    
-    @Transactional
-    public void decrementFolderCount(Long spaceId) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space != null) {
-            space.setFolderCount(Math.max(0, space.getFolderCount() - 1));
-            spaceRepository.save(space);
-        }
-    }
-    
-    public boolean checkQuota(Long spaceId, Long additionalSize) {
-        PanSpace space = spaceRepository.findById(spaceId).orElse(null);
-        if (space == null) return false;
-        
-        return (space.getUsedQuota() + additionalSize) <= space.getTotalQuota();
     }
 }

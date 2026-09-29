@@ -5,15 +5,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PanGlobalAdminRepository extends JpaRepository<PanGlobalAdmin, Long> {
-    
+
     boolean existsByUserId(String userId);
-    
-    void deleteByUserId(String userId);
-    
-    long count();
-    
+
+    Optional<PanGlobalAdmin> findByUserId(String userId);
+
     List<PanGlobalAdmin> findAllByOrderByCreatedAtDesc();
 }
