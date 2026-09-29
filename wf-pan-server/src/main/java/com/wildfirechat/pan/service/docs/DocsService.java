@@ -133,7 +133,7 @@ public class DocsService {
     /**
      * 打开文档：校验权限、决定编辑/只读、签配置，并记入「最近打开」
      *
-     * @param platform pc / mobile（手机端一律只读：社区版的手机网页端不能编辑）
+     * @param platform pc / mobile（手机端默认只读：社区版的手机网页端不能编辑，见 docs.mobile_edit）
      */
     public Map<String, Object> openEditor(Long fileId, String userId, String platform, boolean forceView) {
         requireEnabled();
@@ -151,7 +151,7 @@ public class DocsService {
             viewReason = "permission";
         } else if (!EDITABLE.contains(ext)) {
             viewReason = CONVERTIBLE.contains(ext) ? "convertible" : "format";
-        } else if (mobile) {
+        } else if (mobile && !docsConfig.isMobileEdit()) {
             viewReason = "mobile";
         } else if (forceView) {
             viewReason = "requested";
@@ -172,7 +172,7 @@ public class DocsService {
         permissions.put("download", true);
         permissions.put("print", true);
         permissions.put("copy", true);
-        permissions.put("chat", canEdit);
+        permissions.put("chat", canEdit && !docsConfig.isHideChat());
 
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("fileType", ext);
@@ -190,7 +190,12 @@ public class DocsService {
         customization.put("forcesave", false);
         customization.put("feedback", false);
         customization.put("help", false);
-        // 保留编辑器自带的标识与「关于」页：满足 ONLYOFFICE 9.x 许可附加条款的署名要求，不要关
+        // ONLYOFFICE 社区版不认这两项（品牌定制要授权），其许可附加条款也要求保留标识与署名 ⇒ 默认不关；
+        // 部署包用的 Euro-Office 放开了品牌定制，由部署配置打开（署名改放在文档首页的「开源许可」）
+        if (docsConfig.isHideBranding()) {
+            customization.put("logo", Map.of("visible", false));
+            customization.put("about", false);
+        }
 
         Map<String, Object> editorConfig = new LinkedHashMap<>();
         editorConfig.put("mode", canEdit ? "edit" : "view");

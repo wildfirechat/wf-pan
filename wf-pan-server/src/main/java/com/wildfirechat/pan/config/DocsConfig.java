@@ -31,6 +31,18 @@ public class DocsConfig {
     @Value("${docs.callback_base_url:http://wf-pan:8081}")
     private String callbackBaseUrl;
 
+    /** 手机端可编辑：ONLYOFFICE 社区版的手机网页端不能编辑（会弹商业许可提示），只有引擎支持时才打开 */
+    @Value("${docs.mobile_edit:false}")
+    private boolean mobileEdit;
+
+    /** 隐藏编辑器左上角标识与「关于」：只有引擎放开了品牌定制（授权版或不带附加条款的分支）才打开 */
+    @Value("${docs.hide_branding:false}")
+    private boolean hideBranding;
+
+    /** 隐藏编辑器自带的聊天（IM 里协作不需要第二个聊天窗口；批注不受影响） */
+    @Value("${docs.hide_chat:true}")
+    private boolean hideChat;
+
     /** 网盘在对外入口上的路径前缀（NG 把 /pan/ 去掉前缀转给本服务的客户端端口） */
     @Value("${pan.public_path:/pan}")
     private String panPublicPath;

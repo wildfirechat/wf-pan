@@ -42,6 +42,16 @@ select { font: inherit; color: inherit; background: var(--panel); border: 1px so
 .icon.word { background: var(--word); } .icon.cell { background: var(--cell); } .icon.slide { background: var(--slide); }
 .icon.pdf { background: var(--pdf); } .icon.other { background: var(--other); }
 .empty, .notice { color: var(--muted); padding: 36px 16px; text-align: center; }
+.foot { text-align: center; padding: 18px 0 6px; font-size: 12px; }
+.foot a, .doc a { color: var(--muted); }
+
+/* 开源许可页 */
+.doc { max-width: 760px; margin: 0 auto; padding: 16px; }
+.doc h1 { font-size: 20px; margin: 4px 0 6px; }
+.doc h2 { font-size: 15px; margin: 22px 0 6px; }
+.doc p, .doc li { color: var(--text); }
+.doc .meta { color: var(--muted); font-size: 12px; }
+.doc code { font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; word-break: break-all; }
 
 /* 编辑页 */
 .editor-page { display: flex; flex-direction: column; height: 100%; }
@@ -49,7 +59,10 @@ select { font: inherit; color: inherit; background: var(--panel); border: 1px so
 .bar .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar .grow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .bar .actions { display: flex; gap: 6px; flex: none; }
-#editor { flex: 1; min-height: 0; }
+#editor { flex: 1; min-height: 0; position: relative; }
+/* 手机版编辑器的 iframe 被 api.js 设成 position:fixed、高 100%（按整屏算），放在标题栏下面底部会被裁掉
+   （右下角的「编辑」按钮就在那里）⇒ 一律铺满 #editor */
+#editor > iframe { position: absolute !important; inset: 0; height: 100% !important; }
 .bar .actions button .ico { display: none; }
 @media (max-width: 600px) { .bar .actions button .lbl { display: none; } .bar .actions button .ico { display: inline; } }
 

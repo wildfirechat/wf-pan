@@ -1,5 +1,6 @@
 package com.wildfirechat.pan.controller.client;
 
+import com.wildfirechat.pan.config.DocsConfig;
 import com.wildfirechat.pan.dto.Result;
 import com.wildfirechat.pan.dto.request.CreateDocRequest;
 import com.wildfirechat.pan.dto.request.EditorConfigRequest;
@@ -22,7 +23,10 @@ public class ClientDocsController {
     
     @Autowired
     private DocsService docsService;
-    
+
+    @Autowired
+    private DocsConfig docsConfig;
+
     /**
      * 用空白模板新建 docx / xlsx / pptx
      */
@@ -36,7 +40,7 @@ public class ClientDocsController {
     }
     
     /**
-     * 打开编辑器：返回签好名的编辑器配置（手机端、无编辑权、旧格式一律只读）
+     * 打开编辑器：返回签好名的编辑器配置（无编辑权、旧格式只读；手机端按 docs.mobile_edit）
      */
     @PostMapping("/editor-config")
     public Result<Map<String, Object>> editorConfig(@Valid @RequestBody EditorConfigRequest request,
@@ -61,6 +65,14 @@ public class ClientDocsController {
         return Result.success(docsService.convert(request.getFileId(), userId));
     }
     
+    /**
+     * 文档页用的开关：手机上能不能编辑（决定首页是否给手机提供新建）
+     */
+    @PostMapping("/options")
+    public Result<Map<String, Object>> options() {
+        return Result.success(Map.of("mobileEdit", docsConfig.isMobileEdit()));
+    }
+
     /**
      * 最近打开
      */

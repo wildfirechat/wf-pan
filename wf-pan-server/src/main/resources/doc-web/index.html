@@ -19,6 +19,7 @@
     <button data-tab="shared">共享给我</button>
   </div>
   <div class="list" id="list"><div class="empty">加载中…</div></div>
+  <div class="foot"><a href="licenses.html">开源许可</a></div>
 </div>
 <script src="app.js"></script>
 <script>
@@ -27,8 +28,9 @@
   var D = window.PanDoc;
   var listEl = document.getElementById('list');
   var tab = 'recent';
-  // 手机上只能查看（社区版的手机网页端不能编辑），不提供新建
-  if (D.isMobile()) document.getElementById('create').hidden = true;
+  // 手机上默认不提供新建：只有部署打开了手机端编辑（docs.mobile_edit）才给，否则新建出来也只能看
+  var createEl = document.getElementById('create');
+  if (D.isMobile()) createEl.hidden = true;
   try { tab = localStorage.getItem('pan.doc.tab') || 'recent'; } catch (e) { /* 无痕模式等 */ }
 
   function showError(e) {
@@ -94,6 +96,9 @@
   // 从别的页签回来时刷新（例如刚在编辑页里改了文件）
   document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
   load();
+  if (D.isMobile()) {
+    D.api('docs/options').then(function (o) { createEl.hidden = !o.mobileEdit; }).catch(function () { /* 保持隐藏 */ });
+  }
 })();
 </script>
 </body>
