@@ -52,7 +52,7 @@ npm run build
 | 开发环境 | http://localhost:3000 |
 | 生产环境（嵌入后端） | http://localhost:8080 |
 
-默认账号：admin / admin123
+初始账号：admin。密码由后端配置 `pan.admin.initial_password` 指定；未配置时后端首次启动随机生成并打印在日志中（仅一次）。登录后请立即修改密码。
 
 ## 配置说明
 
