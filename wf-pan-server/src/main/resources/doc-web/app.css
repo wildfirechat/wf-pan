@@ -1,15 +1,21 @@
+/* 配色取自客户端（wf-enterprise-chat 的 AppColors），嵌在客户端里与原生界面一致 */
 :root {
-  --bg: #f5f6f8; --panel: #ffffff; --text: #1f2329; --muted: #646a73; --line: #e4e6eb;
-  --accent: #2f6fed; --accent-weak: #e8f0fe; --danger: #d83931; --shadow: 0 8px 28px rgba(0,0,0,.14);
-  --word: #2f6fed; --cell: #1f9d55; --slide: #e8710a; --pdf: #d83931; --other: #8a8f99;
+  --bg: #f9f9fa; --panel: #ffffff; --text: #191919; --text-2: #555555; --muted: #7f7f7f; --subtle: #b2b2b2;
+  --line: #ebeae9; --line-soft: #f2f2f2; --fill: #f2f2f2; --hover: rgba(0,0,0,.04);
+  --accent: #1f64e4; --accent-weak: #e8f0fe; --accent-row: #f5f8fe; --danger: #ed4c4d;
+  --shadow: 0 8px 24px rgba(0,0,0,.16); --art: #d6d6d8;
+  --word: #2f6fed; --cell: #1f9d55; --slide: #e8710a; --pdf: #e5484d; --other: #8a8f99;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17181a; --panel: #222326; --text: #e8e9eb; --muted: #9ba0a8; --line: #34363b;
-    --accent: #5b8ff9; --accent-weak: #22304d; --danger: #f06a62; --shadow: 0 8px 28px rgba(0,0,0,.5);
+    --bg: #1c1c1e; --panel: #2c2c2e; --text: #e0e0e4; --text-2: #aeaeb2; --muted: #8e8e93; --subtle: #636366;
+    --line: #3a3a3c; --line-soft: #333336; --fill: #3a3a3c; --hover: rgba(255,255,255,.06);
+    --accent: #0a84ff; --accent-weak: rgba(10,132,255,.2); --accent-row: rgba(10,132,255,.08); --danger: #ff453a;
+    --shadow: 0 8px 24px rgba(0,0,0,.5); --art: #545458;
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; }
 button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 12px; }
@@ -21,59 +27,126 @@ button.danger { color: var(--danger); }
 button:disabled { opacity: .5; cursor: default; }
 select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 
-/* 首页 */
-.home { max-width: 960px; margin: 0 auto; padding: 16px; }
-.home h1 { font-size: 20px; margin: 4px 0 14px; }
-.create { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
-.create button { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 8px; }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
-.tabs button { border: none; background: none; border-radius: 0; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
-.tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
-.list { background: var(--panel); border-radius: 8px; overflow: hidden; }
-.row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
-.row:last-child { border-bottom: none; }
-.row:hover { background: var(--accent-weak); }
+/* 文件图标（app.js 的 icon()） */
+.ficon { flex: none; display: block; }
+.ficon .b { fill: var(--other); }
+.ficon.word .b { fill: var(--word); } .ficon.cell .b { fill: var(--cell); } .ficon.slide .b { fill: var(--slide); } .ficon.pdf .b { fill: var(--pdf); }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--accent-weak); color: var(--accent); white-space: nowrap; }
+.tag.muted { background: var(--fill); color: var(--muted); }
+
+/* 首页：内容少时「开源许可」也贴在右下角（整页是纵向 flex，页脚 margin-top:auto） */
+.home-page { min-height: 100%; display: flex; flex-direction: column; }
+.home { width: 100%; max-width: 1088px; margin: 0 auto; padding: 28px 24px 0; }
+.home h1 { font-size: 20px; font-weight: 600; margin: 0 0 20px; }
+.in-client .home h1 { display: none; } /* 客户端标题栏已经写着「文档」 */
+.create { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.create button { display: flex; align-items: center; gap: 14px; height: 76px; padding: 0 20px; border-color: var(--line); border-radius: 10px; text-align: left; transition: border-color .15s, box-shadow .15s; }
+.create button:hover { border-color: var(--accent); color: inherit; box-shadow: 0 4px 14px rgba(31,100,228,.12); }
+.create .txt { flex: 1; min-width: 0; }
+.create .t { font-size: 15px; font-weight: 600; }
+.create .d { font-size: 12px; color: var(--muted); }
+.create .plus { flex: none; color: var(--subtle); }
+.create button:hover .plus { color: var(--accent); }
+.files { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.tabs { display: flex; gap: 28px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 12px 0 10px; color: var(--muted); }
+.tabs button:hover { color: var(--text); }
+.tabs button.on { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+.cols { display: flex; align-items: center; height: 36px; padding: 0 20px; font-size: 12px; color: var(--muted); }
+.list .row { min-height: 56px; padding: 0 20px; gap: 0; border-top: 1px solid var(--line-soft); cursor: pointer; }
+.list .row:hover { background: var(--accent-row); }
+.c-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.c-who, .c-time { width: 160px; flex: none; padding-right: 12px; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-perm { width: 72px; flex: none; display: flex; justify-content: flex-end; }
+.list .meta { display: none; }
+.sk { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 20px; border-top: 1px solid var(--line-soft); }
+.sk:first-child { border-top: none; }
+.sk i { display: block; height: 10px; border-radius: 4px; background: var(--fill); animation: sk .9s ease-in-out infinite alternate; }
+@keyframes sk { to { opacity: .4; } }
+.empty, .notice { color: var(--muted); padding: 36px 16px; text-align: center; }
+.list .empty { padding: 56px 16px 60px; font-size: 12px; }
+.empty svg { display: block; margin: 0 auto 14px; }
+.empty .t { color: var(--text); font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.foot { margin-top: auto; display: flex; justify-content: flex-end; padding: 14px 24px; font-size: 12px; }
+.foot a { color: var(--subtle); text-decoration: none; }
+.foot a:hover { color: var(--muted); text-decoration: underline; }
+@media (max-width: 640px) {
+  .home { padding: 16px 12px 0; }
+  .create { gap: 8px; margin-bottom: 16px; }
+  .create button { flex-direction: column; justify-content: center; gap: 8px; height: 88px; padding: 0 4px; text-align: center; }
+  .create .txt { flex: none; }
+  .create .t { font-size: 13px; font-weight: 400; }
+  .create .d, .create .plus { display: none; }
+  .tabs { gap: 24px; padding: 0 16px; }
+  .cols, .c-who, .c-time { display: none !important; }
+  .list .row, .sk { min-height: 64px; padding: 0 16px; }
+  .list .row .name { font-size: 15px; }
+  .list .meta { display: block; }
+  .c-perm { width: auto; padding-left: 12px; }
+  .foot { padding: 12px 16px 16px; }
+}
+
+/* 行（首页列表与面板共用） */
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.row .grow { flex: 1; min-width: 0; }
 .row .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .grow { flex: 1; min-width: 0; }
-.tag { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--accent-weak); color: var(--accent); white-space: nowrap; }
-.tag.muted { background: var(--bg); color: var(--muted); }
-.icon { width: 30px; height: 30px; border-radius: 6px; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; flex: none; }
-.icon.word { background: var(--word); } .icon.cell { background: var(--cell); } .icon.slide { background: var(--slide); }
-.icon.pdf { background: var(--pdf); } .icon.other { background: var(--other); }
-.empty, .notice { color: var(--muted); padding: 36px 16px; text-align: center; }
-.foot { text-align: center; padding: 18px 0 6px; font-size: 12px; }
-.foot a, .doc a { color: var(--muted); }
 
 /* 开源许可页 */
-.doc { max-width: 760px; margin: 0 auto; padding: 16px; }
-.doc h1 { font-size: 20px; margin: 4px 0 6px; }
-.doc h2 { font-size: 15px; margin: 22px 0 6px; }
-.doc p, .doc li { color: var(--text); }
-.doc .meta { color: var(--muted); font-size: 12px; }
-.doc code { font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; word-break: break-all; }
+.doc { max-width: 808px; margin: 0 auto; padding: 28px 24px 32px; }
+.doc h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+.doc .intro { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+.in-client .doc h1, .in-client .doc .back { display: none; } /* 客户端里有标题栏和返回键 */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 24px; margin-bottom: 16px; }
+.card .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.card .head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.card .title { font-size: 16px; font-weight: 600; }
+.card p { margin: 8px 0 10px; font-size: 13px; line-height: 1.7; color: var(--text-2); }
+.card .links { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 13px; }
+.card .links a { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); text-decoration: none; }
+.card .links a:hover { text-decoration: underline; }
+.card.items { padding-bottom: 6px; }
+.card .item { display: flex; align-items: center; gap: 12px; min-height: 44px; border-top: 1px solid var(--line-soft); }
+.card .label + .item { border-top: none; }
+.card .item .grow { flex: 1; min-width: 0; }
+.card .note { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.lic { flex: none; font-size: 12px; padding: 1px 8px; border-radius: 4px; background: var(--fill); color: var(--text-2); white-space: nowrap; }
+.lic.plain { background: none; padding: 0; color: var(--muted); }
+.doc .back { display: inline-block; margin-top: 4px; color: var(--muted); font-size: 13px; text-decoration: none; }
+.doc .back:hover { color: var(--text); }
+@media (max-width: 640px) { .doc { padding: 16px 12px 24px; } .card { padding: 16px; } }
 
-/* 编辑页 */
+/* 编辑页：新版客户端把标题和按钮画在它自己的标题栏里（setPageHeader），本栏只在浏览器、旧版客户端里出现 */
 .editor-page { display: flex; flex-direction: column; height: 100%; }
-.bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 44px; }
-.bar .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar .grow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.bar .actions { display: flex; gap: 6px; flex: none; }
+.bar { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.bar .grow { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.bar .title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.bar .actions button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: none; background: none; }
+.bar .actions button:hover { background: var(--hover); color: inherit; }
+.bar .actions button.primary { margin-left: 4px; padding: 0 16px; background: var(--accent); color: #fff; }
+.bar .actions button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+.bar .actions svg { flex: none; display: block; }
+@media (max-width: 600px) {
+  .bar { padding: 0 6px 0 12px; }
+  .bar .tag { display: none; }
+  .bar .actions button, .bar .actions button.primary { padding: 0 9px; }
+  .bar .actions .lbl { display: none; }
+}
 #editor { flex: 1; min-height: 0; position: relative; }
 /* 手机版编辑器的 iframe 被 api.js 设成 position:fixed、高 100%（按整屏算），放在标题栏下面底部会被裁掉
    （右下角的「编辑」按钮就在那里）⇒ 一律铺满 #editor */
 #editor > iframe { position: absolute !important; inset: 0; height: 100% !important; }
-.bar .actions button .ico { display: none; }
-@media (max-width: 600px) { .bar .actions button .lbl { display: none; } .bar .actions button .ico { display: inline; } }
+.fatal { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: var(--muted); }
+.fatal .t { color: var(--text); font-size: 15px; font-weight: 500; }
+.fatal button { margin-top: 4px; padding: 7px 20px; }
 
 /* 面板 */
 .mask { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
-.panel { background: var(--panel); border-radius: 10px; box-shadow: var(--shadow); width: 520px; max-width: 100%; max-height: 86vh; display: flex; flex-direction: column; }
-.panel header { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); font-weight: 600; }
-.panel header .grow { flex: 1; }
+.panel { background: var(--panel); border-radius: 12px; box-shadow: var(--shadow); width: 520px; max-width: 100%; max-height: 86vh; display: flex; flex-direction: column; }
+.panel header { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.panel header .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel .body { overflow: auto; padding: 4px 0; }
-.panel .body .row { cursor: default; }
-.panel .body .row:hover { background: none; }
 .panel footer { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .panel footer .hint { color: var(--muted); font-size: 12px; flex-basis: 100%; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-weak); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 13px; flex: none; overflow: hidden; }

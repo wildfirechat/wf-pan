@@ -5,73 +5,110 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文档</title>
 <link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
 </head>
 <body>
-<div class="home">
-  <h1>文档</h1>
-  <div class="create" id="create">
-    <button data-type="docx"><div class="icon word">W</div>新建文档</button>
-    <button data-type="xlsx"><div class="icon cell">X</div>新建表格</button>
-    <button data-type="pptx"><div class="icon slide">P</div>新建演示</button>
-  </div>
-  <div class="tabs" id="tabs">
-    <button data-tab="recent" class="on">最近打开</button>
-    <button data-tab="shared">共享给我</button>
-  </div>
-  <div class="list" id="list"><div class="empty">加载中…</div></div>
-  <div class="foot"><a href="licenses.html">开源许可</a></div>
+<div class="home-page">
+  <main class="home">
+    <h1>文档</h1>
+    <div class="create" id="create">
+      <button data-type="docx"><div class="txt"><div class="t">新建文档</div><div class="d">Word 文档 · .docx</div></div></button>
+      <button data-type="xlsx"><div class="txt"><div class="t">新建表格</div><div class="d">Excel 表格 · .xlsx</div></div></button>
+      <button data-type="pptx"><div class="txt"><div class="t">新建演示</div><div class="d">PowerPoint 演示 · .pptx</div></div></button>
+    </div>
+    <section class="files">
+      <div class="tabs" id="tabs">
+        <button data-tab="recent" class="on">最近打开</button>
+        <button data-tab="shared">共享给我</button>
+      </div>
+      <div class="cols" id="cols" hidden>
+        <div class="c-name">名称</div><div class="c-who" id="colWho"></div><div class="c-time" id="colTime"></div><div class="c-perm">权限</div>
+      </div>
+      <div class="list" id="list"></div>
+    </section>
+  </main>
+  <footer class="foot"><a href="licenses.html" id="licenses">开源许可</a></footer>
 </div>
-<script src="app.js"></script>
 <script>
 (function () {
   'use strict';
   var D = window.PanDoc;
   var listEl = document.getElementById('list');
+  var colsEl = document.getElementById('cols');
   var tab = 'recent';
+  var COLS = { recent: ['所有者', '最近打开'], shared: ['共享自', '共享时间'] };
+  var PLUS = '<svg class="plus" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+  var EMPTY_ART = '<svg width="72" height="64" viewBox="0 0 72 64" fill="none" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" style="stroke: var(--art)" aria-hidden="true">' +
+    '<path d="M22 10h22l12 12v34a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4V14a4 4 0 0 1 4-4z" style="fill: var(--bg)"/>' +
+    '<path d="M44 10v8a4 4 0 0 0 4 4h8M27 34h20M27 42h20M27 50h12"/></svg>';
+  var SKELETON = new Array(4).join('<div class="sk"><i style="width:26px;height:31px"></i><i style="width:32%"></i></div>');
   // 手机上默认不提供新建：只有部署打开了手机端编辑（docs.mobile_edit）才给，否则新建出来也只能看
   var createEl = document.getElementById('create');
   if (D.isMobile()) createEl.hidden = true;
+  Array.prototype.forEach.call(createEl.querySelectorAll('button'), function (b) {
+    b.insertAdjacentHTML('afterbegin', D.icon('x.' + b.dataset.type, 'lg'));
+    b.insertAdjacentHTML('beforeend', PLUS);
+  });
   try { tab = localStorage.getItem('pan.doc.tab') || 'recent'; } catch (e) { /* 无痕模式等 */ }
 
   function showError(e) {
+    colsEl.hidden = true;
     listEl.innerHTML = '<div class="notice">' + D.esc(e.notInClient ? '请在客户端中打开「文档」' : e.message) + '</div>';
   }
 
-  function row(file, meta, perm) {
-    return '<div class="row" data-id="' + file.id + '">' + D.icon(file.name) +
-      '<div class="grow"><div class="name">' + D.esc(file.name) + '</div><div class="meta">' + D.esc(meta) + '</div></div>' +
-      (perm ? '<span class="tag' + (perm === 'EDIT' ? '' : ' muted') + '">' + D.PERM[perm] + '</span>' : '') + '</div>';
+  function showEmpty(title, desc) {
+    colsEl.hidden = true;
+    listEl.innerHTML = '<div class="empty">' + EMPTY_ART + '<div class="t">' + D.esc(title) + '</div>' + D.esc(desc) + '</div>';
   }
 
-  function load() {
+  function row(file, who, time, perm) {
+    return '<div class="row" data-id="' + file.id + '">' +
+      '<div class="c-name">' + D.icon(file.name) + '<div class="grow"><div class="name">' + D.esc(file.name) + '</div>' +
+      '<div class="meta">' + D.esc(time + (who ? ' · ' + who : '')) + '</div></div></div>' +
+      '<div class="c-who">' + D.esc(who) + '</div><div class="c-time">' + D.esc(time) + '</div>' +
+      '<div class="c-perm">' + (perm ? '<span class="tag' + (perm === 'EDIT' ? '' : ' muted') + '">' + D.PERM[perm] + '</span>' : '') + '</div></div>';
+  }
+
+  function showRows(html) {
+    document.getElementById('colWho').textContent = COLS[tab][0];
+    document.getElementById('colTime').textContent = COLS[tab][1];
+    colsEl.hidden = false;
+    listEl.innerHTML = html;
+  }
+
+  /** @param quiet 回到本页时的刷新：保留当前列表直到新数据到，不闪骨架 */
+  function load(quiet) {
+    var current = tab;
     Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) {
       b.classList.toggle('on', b.dataset.tab === tab);
     });
-    listEl.innerHTML = '<div class="empty">加载中…</div>';
-    if (tab === 'recent') {
-      D.api('docs/recent').then(function (items) {
-        if (!items.length) { listEl.innerHTML = '<div class="empty">还没有打开过文档。可以新建一个，或从网盘、聊天里打开。</div>'; return; }
-        listEl.innerHTML = items.map(function (it) {
-          return row(it.file, D.fmtTime(it.openedAt) + ' 打开 · ' + (it.file.creatorName || ''), it.permission);
-        }).join('');
-      }).catch(showError);
-    } else {
-      D.api('shares/with-me').then(function (items) {
-        if (!items.length) { listEl.innerHTML = '<div class="empty">暂时没有别人共享给你的文件</div>'; return; }
-        listEl.innerHTML = items.map(function (it) {
-          var from = it.sources.map(function (s) {
-            return s.targetType === 'GROUP' ? '群「' + s.targetName + '」' : s.createdByName;
-          });
-          var uniq = from.filter(function (v, i) { return from.indexOf(v) === i; });
-          return row(it.file, '来自 ' + uniq.join('、') + ' · ' + D.fmtTime(it.sharedAt), it.permission);
-        }).join('');
-      }).catch(showError);
-    }
+    if (!quiet) { colsEl.hidden = true; listEl.innerHTML = SKELETON; }
+    var p = tab === 'recent' ? D.api('docs/recent').then(function (items) {
+      if (current !== tab) return;
+      if (!items.length) {
+        showEmpty('还没有打开过文档', createEl.hidden ? '从网盘、聊天里打开的文档会出现在这里' : '新建一个，或从网盘、聊天里打开文档');
+        return;
+      }
+      showRows(items.map(function (it) {
+        return row(it.file, it.file.creatorName || '', D.fmtTime(it.openedAt), it.permission);
+      }).join(''));
+    }) : D.api('shares/with-me').then(function (items) {
+      if (current !== tab) return;
+      if (!items.length) { showEmpty('暂时没有共享给你的文件', '别人把文件分享给你或你所在的群后，会出现在这里'); return; }
+      showRows(items.map(function (it) {
+        var from = it.sources.map(function (s) {
+          return s.targetType === 'GROUP' ? '群「' + s.targetName + '」' : s.createdByName;
+        });
+        var uniq = from.filter(function (v, i) { return from.indexOf(v) === i; });
+        return row(it.file, uniq.join('、'), D.fmtTime(it.sharedAt), it.permission);
+      }).join(''));
+    });
+    p.catch(function (e) { if (current === tab) showError(e); });
   }
 
   document.getElementById('tabs').addEventListener('click', function (e) {
     var b = e.target.closest('button');
-    if (!b) return;
+    if (!b || b.dataset.tab === tab) return;
     tab = b.dataset.tab;
     try { localStorage.setItem('pan.doc.tab', tab); } catch (err) { /* 忽略 */ }
     load();
@@ -82,19 +119,26 @@
     if (r) D.openDoc(r.dataset.id);
   });
 
-  document.getElementById('create').addEventListener('click', function (e) {
+  createEl.addEventListener('click', function (e) {
     var b = e.target.closest('button');
     if (!b || b.disabled) return;
     b.disabled = true;
     D.api('docs/create', { type: b.dataset.type }).then(function (file) {
       D.openDoc(file.id);
       tab = 'recent';
-      setTimeout(load, 800);
+      setTimeout(function () { load(true); }, 800);
     }).catch(function (err) { D.toast(err.message); }).finally(function () { b.disabled = false; });
   });
 
+  // 客户端里交给客户端开新页面：它的返回键回到这里（本页内跳转的话，返回键会直接退出「文档」）
+  document.getElementById('licenses').addEventListener('click', function (e) {
+    if (!D.Bridge.available()) return;
+    e.preventDefault();
+    D.openLink(this.href);
+  });
+
   // 从别的页签回来时刷新（例如刚在编辑页里改了文件）
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(true); });
   load();
   if (D.isMobile()) {
     D.api('docs/options').then(function (o) { createEl.hidden = !o.mobileEdit; }).catch(function () { /* 保持隐藏 */ });

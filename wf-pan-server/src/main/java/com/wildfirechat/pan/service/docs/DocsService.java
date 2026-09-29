@@ -196,6 +196,10 @@ public class DocsService {
         customization.put("forcesave", false);
         customization.put("feedback", false);
         customization.put("help", false);
+        // 编辑器自己的标题行（快捷按钮 + 文件名 + 协作者）并进页签那一行，且不显示文件名：
+        // 文件名已在客户端标题栏（或 open.html 的顶栏）里，不必再占一行
+        customization.put("compactHeader", true);
+        customization.put("toolbarHideFileName", true);
         // ONLYOFFICE 社区版不认这两项（品牌定制要授权），其许可附加条款也要求保留标识与署名 ⇒ 默认不关；
         // 部署包用的 Euro-Office 放开了品牌定制，由部署配置打开（署名改放在文档首页的「开源许可」）
         if (docsConfig.isHideBranding()) {

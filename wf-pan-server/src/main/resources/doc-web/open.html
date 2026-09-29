@@ -5,21 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>文档</title>
 <link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
 </head>
 <body>
 <div class="editor-page">
-  <div class="bar">
-    <div class="grow"><span class="title" id="title">加载中…</span><span class="tag" id="mode" hidden></span></div>
-    <div class="actions">
-      <button id="btnConvert" hidden title="转换为可编辑的格式，另存为新文件"><span class="lbl">转换后编辑</span><span class="ico">⇄</span></button>
-      <button id="btnShare" hidden title="分享"><span class="lbl">分享</span><span class="ico">⤴</span></button>
-      <button id="btnVersions" hidden title="历史版本"><span class="lbl">历史版本</span><span class="ico">⟲</span></button>
-      <button id="btnDownload" hidden title="下载"><span class="lbl">下载</span><span class="ico">⤓</span></button>
-    </div>
+  <div class="bar" id="bar" hidden>
+    <div class="grow"><span id="ficon"></span><span class="title" id="title"></span><span class="tag muted" id="mode" hidden></span></div>
+    <div class="actions" id="actions"></div>
   </div>
   <div id="editor"></div>
 </div>
-<script src="app.js"></script>
 <script>
 (function () {
   'use strict';
@@ -28,6 +23,19 @@
   var info = null;
   var docEditor = null;
   var apiLoaded = null;
+  var converting = false;
+  // 标题栏按钮的图标（客户端按 icon 名字画自己的图标，页面自己画时用这里的）
+  var SVG = function (d) {
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
+  };
+  var ICON = {
+    convert: SVG('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
+    history: SVG('<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/>'),
+    download: SVG('<path d="M12 3v12M7 10l5 5 5-5M4 19h16"/>'),
+    share: SVG('<circle cx="9" cy="8" r="3.5"/><path d="M3 20c.8-3.5 3.3-5 6-5s5.2 1.5 6 5M18 8v6M15 11h6"/>')
+  };
+  // 先接管客户端标题栏（按钮等配置到了再给）：此后客户端不再拿 document.title（此刻还是「文档」）盖标题
+  var inHeader = D.pageHeader({ actions: [] }, onAction);
   var REASON = {
     permission: '只读 · 你只有查看权限',
     convertible: '只读 · 旧格式，转换后可编辑',
@@ -42,9 +50,40 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
-  function fatal(msg) {
-    $('title').textContent = '';
-    $('editor').innerHTML = '<div class="notice">' + D.esc(msg) + '</div>';
+  /**
+   * 标题栏：新版客户端画在它自己的标题栏里，否则（浏览器、旧版客户端）页面顶上自己画一行。
+   * @param note 只读说明，可编辑时为空
+   */
+  function showHeader(title, note, actions) {
+    if (inHeader) {
+      D.pageHeader({ title: title, subtitle: note, actions: actions }, onAction);
+      return;
+    }
+    $('bar').hidden = false;
+    $('ficon').innerHTML = D.icon(title, 'sm');
+    $('title').textContent = title;
+    $('mode').hidden = !note;
+    $('mode').textContent = note;
+    $('actions').innerHTML = actions.map(function (a) {
+      return '<button data-act="' + a.id + '"' + (a.primary ? ' class="primary"' : '') + ' title="' + D.esc(a.text) + '">' +
+        ICON[a.icon] + '<span class="lbl">' + D.esc(a.text) + '</span></button>';
+    }).join('');
+  }
+
+  function onAction(id) {
+    if (id === 'download') download();
+    else if (!info) return;
+    else if (id === 'share') openShare();
+    else if (id === 'versions') openVersions();
+    else if (id === 'convert') convert();
+  }
+
+  /** 打不开：说明原因；聊天里的文件卡片也指向本页，格式不支持、在线文档未启用时仍给下载（有没有权限由 files/url 判） */
+  function fatal(msg, canDownload) {
+    $('bar').hidden = true;
+    $('editor').innerHTML = '<div class="fatal">' + D.icon('', 'lg') + '<div class="t">' + D.esc(msg) + '</div>' +
+      (canDownload ? '<button class="primary" id="fatalDownload">下载文件</button>' : '') + '</div>';
+    if (canDownload) $('fatalDownload').addEventListener('click', download);
   }
 
   function loadApi(src) {
@@ -65,15 +104,12 @@
     D.api('docs/editor-config', { fileId: fileId, platform: D.isMobile() ? 'mobile' : 'pc' }).then(function (res) {
       info = res;
       document.title = res.fileName;
-      $('title').textContent = res.fileName;
-      var mode = $('mode');
-      mode.hidden = false;
-      mode.textContent = res.canEdit ? '可编辑' : (REASON[res.viewReason] || '只读');
-      mode.className = 'tag' + (res.canEdit ? '' : ' muted');
-      $('btnShare').hidden = !res.canShare;
-      $('btnVersions').hidden = false;
-      $('btnDownload').hidden = false;
-      $('btnConvert').hidden = !(res.convertible && !D.isMobile());
+      // 可编辑是常态，不标（编辑器自己有「编辑 ▾」）；只读才说明原因
+      var actions = [];
+      if (res.convertible && !D.isMobile()) actions.push({ id: 'convert', text: '转换后编辑', icon: 'convert' });
+      actions.push({ id: 'versions', text: '历史版本', icon: 'history' }, { id: 'download', text: '下载', icon: 'download' });
+      if (res.canShare) actions.push({ id: 'share', text: '分享', icon: 'share', primary: true });
+      showHeader(res.fileName, res.canEdit ? '' : (REASON[res.viewReason] || '只读'), actions);
       return loadApi(res.apiUrl).then(function () {
         var cfg = res.config;
         cfg.events = {
@@ -96,15 +132,28 @@
         docEditor = new window.DocsAPI.DocEditor('ph', cfg);
       });
     }).catch(function (e) {
-      if (e.notInClient) { fatal('请在客户端中打开'); return; }
-      // 聊天里的文件卡片也指向本页：打不开（格式不支持、在线文档未启用）时仍给下载，有没有权限由 files/url 判
-      fatal(e.message);
-      $('btnDownload').hidden = false;
+      fatal(e.notInClient ? '请在客户端中打开' : e.message, !e.notInClient);
     });
+  }
+
+  function download() {
+    D.api('files/url', { fileId: fileId }).then(function (u) { D.openLink(u.storageUrl); }).catch(function (e) { D.toast(e.message); });
+  }
+
+  function convert() {
+    if (converting) return;
+    converting = true;
+    D.toast('正在转换…');
+    D.api('docs/convert', { fileId: fileId }).then(function (f) {
+      D.toast('已另存为「' + f.name + '」');
+      D.openDoc(f.id);
+    }).catch(function (e) { D.toast(e.message); }).finally(function () { converting = false; });
   }
 
   // ------------------------------------------------------------ 面板
   function panel(title, bodyHtml, footerHtml) {
+    // 标题栏的按钮在客户端里，面板开着也点得到：同时只留一个面板
+    Array.prototype.forEach.call(document.querySelectorAll('.mask'), function (el) { el.remove(); });
     var m = document.createElement('div');
     m.className = 'mask';
     m.innerHTML = '<div class="panel"><header><span class="grow">' + D.esc(title) + '</span>' +
@@ -218,19 +267,9 @@
     render();
   }
 
-  $('btnShare').addEventListener('click', openShare);
-  $('btnVersions').addEventListener('click', openVersions);
-  $('btnDownload').addEventListener('click', function () {
-    D.api('files/url', { fileId: fileId }).then(function (u) { D.openLink(u.storageUrl); }).catch(function (e) { D.toast(e.message); });
-  });
-  $('btnConvert').addEventListener('click', function () {
-    var b = $('btnConvert');
-    b.disabled = true;
-    D.toast('正在转换…');
-    D.api('docs/convert', { fileId: fileId }).then(function (f) {
-      D.toast('已另存为「' + f.name + '」');
-      D.openDoc(f.id);
-    }).catch(function (e) { D.toast(e.message); }).finally(function () { b.disabled = false; });
+  $('actions').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (b) onAction(b.dataset.act);
   });
 
   open();

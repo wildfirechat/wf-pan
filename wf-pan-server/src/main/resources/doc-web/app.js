@@ -44,12 +44,34 @@
         } catch (e) { /* 正常情况下异步方法同步返回空 */ }
       });
     },
+    /** 调一个会多次回调的异步方法：客户端用 setProgressData 回结果，回调常驻（再调同一方法就换成新的回调） */
+    listen: function (method, args, onData) {
+      var name = '__pandsl_' + method.replace(/\W/g, '_');
+      window[name] = onData;
+      var arg = JSON.stringify({ data: args === undefined ? null : args, _dscbstub: name });
+      if (window._dsbridge) window._dsbridge.call(method, arg); else prompt('_dsbridge=' + method, arg);
+    },
     has: function (method) {
       if (!Bridge.available()) return false;
       var r = Bridge.callSync('_dsb.hasNativeMethod', { name: method, type: 'all' });
       return r && r.data === true;
     }
   };
+  // 客户端里有自己的标题栏和返回键，页面上重复的标题、「返回」据此藏掉（本脚本在 <head> 里加载，不闪）
+  document.documentElement.classList.toggle('in-client', Bridge.available());
+
+  var headerSupported = null;
+  /**
+   * 把标题、只读说明和操作按钮交给客户端标题栏去画（新版客户端有 setPageHeader），页面就不用自己再占一栏。
+   * header = {title, subtitle, actions: [{id, text, icon, primary}]}，每次整体替换；title 省略时客户端保留原标题。
+   * 点按钮时回调 onAction(按钮 id)。返回 false 表示客户端不支持（浏览器里、旧版客户端），由页面自己画。
+   */
+  function pageHeader(header, onAction) {
+    if (headerSupported === null) headerSupported = Bridge.has('setPageHeader');
+    if (!headerSupported) return false;
+    Bridge.listen('setPageHeader', header, function (id) { onAction(String(id)); });
+    return true;
+  }
 
   // ------------------------------------------------------------ 登录与接口
   var loginPromise = null;
@@ -108,10 +130,17 @@
     for (var k in KIND) if (KIND[k].indexOf(e) >= 0) return k;
     return 'other';
   }
-  function icon(name) {
+  var ICON_SIZE = { sm: [20, 24], md: [26, 31], lg: [32, 38] };
+  /** 折角的文件图标，颜色按类型（样式见 app.css 的 .ficon）；size: sm / md（默认）/ lg */
+  function icon(name, size) {
     var k = kind(name);
     var t = { word: 'W', cell: 'X', slide: 'P', pdf: 'PDF', other: (ext(name) || '?').slice(0, 3).toUpperCase() }[k];
-    return '<div class="icon ' + k + '">' + esc(t) + '</div>';
+    var wh = ICON_SIZE[size] || ICON_SIZE.md;
+    return '<svg class="ficon ' + k + '" width="' + wh[0] + '" height="' + wh[1] + '" viewBox="0 0 30 36" aria-hidden="true">' +
+      '<path class="b" d="M4 0h15l11 11v21a4 4 0 0 1-4 4H4a4 4 0 0 1-4-4V4a4 4 0 0 1 4-4z"/>' +
+      '<path d="M19 0l11 11h-7a4 4 0 0 1-4-4z" fill="#fff" fill-opacity=".45"/>' +
+      '<text x="15" y="29" text-anchor="middle" font-size="' + (t.length > 1 ? 8 : 10) + '" font-weight="700" fill="#fff">' +
+      esc(t) + '</text></svg>';
   }
   function fmtTime(s) {
     if (!s) return '';
@@ -161,7 +190,7 @@
   }
 
   window.PanDoc = {
-    Bridge: Bridge, api: api, login: login, esc: esc, ext: ext, kind: kind, icon: icon,
+    Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, esc: esc, ext: ext, kind: kind, icon: icon,
     fmtTime: fmtTime, fmtSize: fmtSize, PERM: PERM, toast: toast, isMobile: isMobile,
     openDoc: openDoc, openLink: openLink, DOC_BASE: DOC_BASE
   };

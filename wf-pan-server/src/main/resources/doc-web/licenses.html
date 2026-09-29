@@ -5,32 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>开源许可</title>
 <link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
 </head>
 <body>
 <div class="doc">
   <h1>开源许可</h1>
-  <p class="meta">「文档」的在线编辑使用了下列开源软件，特此致谢。</p>
+  <p class="intro">「文档」的在线编辑使用了下列开源软件，特此致谢。</p>
 
-  <h2>文档编辑引擎：Euro-Office</h2>
-  <p>Euro-Office 基于 Ascensio System SIA 开发的 ONLYOFFICE Docs，按 GNU Affero General Public License v3（AGPL-3.0）发布。
-    本系统未修改其程序代码，只调整了字体、配置默认值和容器启动脚本。</p>
-  <ul>
-    <li>许可全文：<code>https://www.gnu.org/licenses/agpl-3.0.html</code></li>
-    <li>源码：<code>https://github.com/Euro-Office/DocumentServer</code>（所用版本见部署包内的《第三方开源许可》）</li>
-    <li>ONLYOFFICE：<code>https://github.com/ONLYOFFICE/DocumentServer</code></li>
-  </ul>
+  <section class="card">
+    <div class="label">文档编辑引擎</div>
+    <div class="head"><span class="title">Euro-Office DocumentServer</span><span class="lic">AGPL-3.0</span></div>
+    <p>Euro-Office 基于 Ascensio System SIA 开发的 ONLYOFFICE Docs。本系统未修改其程序代码，只调整了字体、配置默认值和容器启动脚本；所用版本见部署包内的《第三方开源许可》。</p>
+    <div class="links">
+      <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">许可全文</a>
+      <a href="https://github.com/Euro-Office/DocumentServer" target="_blank" rel="noopener">Euro-Office 源码</a>
+      <a href="https://github.com/ONLYOFFICE/DocumentServer" target="_blank" rel="noopener">ONLYOFFICE 源码</a>
+    </div>
+  </section>
 
-  <h2>字体</h2>
-  <ul>
-    <li>Noto Sans SC、Noto Serif SC —— SIL Open Font License 1.1</li>
-    <li>朱雀仿宋（Zhuque Fangsong）—— SIL Open Font License 1.1</li>
-    <li>DejaVu、Liberation 及编辑引擎自带的开源字体 —— 各自的开源字体许可</li>
-  </ul>
+  <section class="card items">
+    <div class="label">字体</div>
+    <div class="item"><span class="grow">Noto Sans SC、Noto Serif SC</span><span class="lic">OFL-1.1</span></div>
+    <div class="item"><span class="grow">朱雀仿宋（Zhuque Fangsong）</span><span class="lic">OFL-1.1</span></div>
+    <div class="item"><span class="grow">DejaVu、Liberation 及编辑引擎自带的开源字体</span><span class="lic plain">各自的开源字体许可</span></div>
+  </section>
 
-  <h2>新建文档模板</h2>
-  <p>空白模板由 python-docx、openpyxl、python-pptx（均为 MIT 许可）生成。</p>
+  <section class="card items">
+    <div class="label">新建文档模板</div>
+    <div class="item"><span class="grow">python-docx、openpyxl、python-pptx<span class="note">生成空白模板</span></span><span class="lic">MIT</span></div>
+  </section>
 
-  <p class="foot"><a href="./">返回</a></p>
+  <a class="back" href="./">← 返回文档</a>
 </div>
+<script>
+(function () {
+  'use strict';
+  var D = window.PanDoc;
+  var ARROW = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>';
+  Array.prototype.forEach.call(document.querySelectorAll('.links a'), function (a) {
+    a.title = a.href;
+    a.insertAdjacentHTML('beforeend', ARROW);
+    // 客户端的内置网页不开新窗口：交给客户端开新页面
+    a.addEventListener('click', function (e) {
+      if (!D.Bridge.available()) return;
+      e.preventDefault();
+      D.openLink(a.href);
+    });
+  });
+})();
+</script>
 </body>
 </html>
