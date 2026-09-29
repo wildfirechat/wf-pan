@@ -48,6 +48,21 @@ public class SignService {
         return constEq(signDownload(fileId, versionNo, userId, expireEpochSec), sig);
     }
 
+    /**
+     * ONLYOFFICE 取文件地址的签名：绑定文件、版本、到期时间。
+     * 地址只出现在签给编辑器的配置里，拿到它就说明已经通过了该文件的权限校验
+     */
+    public String signEditorFile(long fileId, int versionNo, long expireEpochSec) {
+        return Hs256Jwt.hmacB64("of|" + fileId + "|" + versionNo + "|" + expireEpochSec, secret);
+    }
+
+    public boolean verifyEditorFile(long fileId, int versionNo, long expireEpochSec, String sig) {
+        if (sig == null || expireEpochSec < System.currentTimeMillis() / 1000) {
+            return false;
+        }
+        return constEq(signEditorFile(fileId, versionNo, expireEpochSec), sig);
+    }
+
     /** 网页会话 Cookie 值：userId.到期时间.签名 */
     public String issueWebSession(String userId) {
         long exp = System.currentTimeMillis() / 1000 + docsConfig.getWebSessionTtlSeconds();

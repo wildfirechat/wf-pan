@@ -1,11 +1,12 @@
 package com.wildfirechat.pan.controller.internal;
 
+import com.wildfirechat.pan.config.ProxiedRequestValve;
 import com.wildfirechat.pan.service.ObjectStoreService;
+import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.docs.DocsService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import com.wildfirechat.pan.config.ProxiedRequestValve;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,8 @@ import java.util.Map;
 
 /**
  * 只给 ONLYOFFICE 在容器网络内调用的接口（NG 不转发 /internal/）。一律校验 ONLYOFFICE 签的 JWT。
+ * 取文件还要校验地址上本服务的签名：ONLYOFFICE 也会为用户指定的地址（如按地址插入图片）签令牌，
+ * JWT 只能证明请求来自 ONLYOFFICE，不能证明这个文件是签给它的。
  * 额外防一层：只认客户端端口、且不是经代理转来的请求（经 NG 转来的都会带 X-Forwarded-For）。
  */
 @RestController
@@ -28,29 +31,32 @@ public class InternalDocsController {
     @Autowired
     private ObjectStoreService objectStoreService;
 
+    @Autowired
+    private SignService signService;
+
     @Value("${server.port}")
     private int clientPort;
 
     /** ONLYOFFICE 取文件（打开、转换时） */
     @GetMapping("/file/{fileId}")
     public void file(@PathVariable Long fileId,
-                     @RequestParam(value = "v", required = false) Integer versionNo,
+                     // 缺参数按签名无效处理
+                     @RequestParam(value = "v", defaultValue = "0") int versionNo,
+                     @RequestParam(value = "e", defaultValue = "0") long expire,
+                     @RequestParam(value = "s", required = false) String sig,
                      @RequestHeader(value = "Authorization", required = false) String authorization,
                      HttpServletRequest request, HttpServletResponse response) throws Exception {
         if (!fromInside(request)) {
             response.sendError(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
-        Map<String, Object> payload = docsService.verifyInbound(authorization, null);
-        if (payload == null) {
-            log.warn("ONLYOFFICE 取文件 JWT 校验失败 file={}", fileId);
+        if (!signService.verifyEditorFile(fileId, versionNo, expire, sig)) {
+            log.warn("ONLYOFFICE 取文件地址签名无效或已过期 file={} v={}", fileId, versionNo);
             response.sendError(HttpServletResponse.SC_FORBIDDEN);
             return;
         }
-        // 令牌里带了地址时，必须就是这个文件（防止拿别的文件的令牌来取）
-        Object url = payload.get("url");
-        if (url instanceof String u && !u.contains("/internal/docs/file/" + fileId + "?") && !u.endsWith("/internal/docs/file/" + fileId)) {
-            log.warn("ONLYOFFICE 取文件令牌与文件不符 file={} tokenUrl={}", fileId, u);
+        if (docsService.verifyInbound(authorization, null) == null) {
+            log.warn("ONLYOFFICE 取文件 JWT 校验失败 file={}", fileId);
             response.sendError(HttpServletResponse.SC_FORBIDDEN);
             return;
         }

@@ -5,6 +5,7 @@ import com.wildfirechat.pan.repository.PanGlobalAdminRepository;
 import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.auth.AdminAuthService;
 import com.wildfirechat.pan.service.auth.ClientAuthService;
+import com.wildfirechat.pan.util.Hs256Jwt;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -229,5 +232,42 @@ class AccessControlTest {
             .andExpect(status().isNotFound());
         mockMvc.perform(get("/internal/docs/file/1").with(port(ADMIN_PORT)))
             .andExpect(status().isNotFound());
+    }
+
+    private MockHttpServletRequestBuilder editorFile(long fileId, int versionNo, long expire, String sig) {
+        return get("/internal/docs/file/" + fileId).with(port(CLIENT_PORT))
+            .param("v", String.valueOf(versionNo))
+            .param("e", String.valueOf(expire))
+            .param("s", sig);
+    }
+
+    @Test
+    void onlyofficeFileUrlIsBoundToFileAndVersion() throws Exception {
+        // 任何经 ONLYOFFICE 签名的令牌都不足以取文件（它也会为用户指定的地址签令牌）
+        String jwt = "Bearer " + Hs256Jwt.sign(Map.of("payload", Map.of("url", "http://attacker.example.com/x")),
+            "test-jwt-secret");
+        long fileId = 987654321L;
+        long expire = System.currentTimeMillis() / 1000 + 600;
+        String sig = signService.signEditorFile(fileId, 1, expire);
+
+        // 签名和 JWT 都有效：通过鉴权（文件不存在，404）
+        mockMvc.perform(editorFile(fileId, 1, expire, sig).header("Authorization", jwt))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(editorFile(fileId + 1, 1, expire, sig).header("Authorization", jwt))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(editorFile(fileId, 2, expire, sig).header("Authorization", jwt))
+            .andExpect(status().isForbidden());
+        long expired = System.currentTimeMillis() / 1000 - 1;
+        mockMvc.perform(editorFile(fileId, 1, expired, signService.signEditorFile(fileId, 1, expired))
+                .header("Authorization", jwt))
+            .andExpect(status().isForbidden());
+        // 下载链接的签名不能用来取编辑器文件
+        mockMvc.perform(editorFile(fileId, 1, expire, signService.signDownload(fileId, 1, "", expire))
+                .header("Authorization", jwt))
+            .andExpect(status().isForbidden());
+        // 只有地址、没有 ONLYOFFICE 的 JWT
+        mockMvc.perform(editorFile(fileId, 1, expire, sig))
+            .andExpect(status().isForbidden());
     }
 }

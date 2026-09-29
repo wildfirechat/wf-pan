@@ -25,6 +25,7 @@ import com.wildfirechat.pan.service.IMUserService;
 import com.wildfirechat.pan.service.ObjectStoreService;
 import com.wildfirechat.pan.service.OperationLogService;
 import com.wildfirechat.pan.service.PermissionService;
+import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.StorageService;
 import com.wildfirechat.pan.service.StorageService.StoredObject;
 import com.wildfirechat.pan.service.UserSpaceInitService;
@@ -79,6 +80,8 @@ public class DocsService {
         "xls", "xlt", "ods", "ots", "et", "ett", "ppt", "pot", "pps", "odp", "otp", "dps", "dpt");
 
     private static final String MY_DOCS_FOLDER = "我的文档";
+    /** 取文件地址的有效期：ONLYOFFICE 在打开、转换时立即下载，之后用自己的缓存 */
+    private static final long EDITOR_FILE_URL_TTL_SECONDS = 24 * 3600;
     private static final Map<String, String> TEMPLATE_MIME = Map.of(
         "docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -109,6 +112,9 @@ public class DocsService {
 
     @Autowired
     private StorageService storageService;
+
+    @Autowired
+    private SignService signService;
 
     @Autowired
     private IMUserService imUserService;
@@ -510,8 +516,13 @@ public class DocsService {
         return b.endsWith("/") ? b.substring(0, b.length() - 1) : b;
     }
 
+    /**
+     * ONLYOFFICE 取文件的地址，带本服务的签名（绑定文件、版本、有效期）
+     */
     private String internalFileUrl(Long fileId, int versionNo) {
-        return internalBase() + "/internal/docs/file/" + fileId + "?v=" + versionNo;
+        long expire = System.currentTimeMillis() / 1000 + EDITOR_FILE_URL_TTL_SECONDS;
+        return internalBase() + "/internal/docs/file/" + fileId + "?v=" + versionNo
+            + "&e=" + expire + "&s=" + signService.signEditorFile(fileId, versionNo, expire);
     }
 
     /**
