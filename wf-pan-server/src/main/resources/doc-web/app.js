@@ -189,9 +189,18 @@
     else window.open(url, '_blank', 'noopener');
   }
 
+  /**
+   * 下载文件。客户端里不能交给 openUrl：它在内置网页里打开地址，文件显示不出来，是个白屏页；
+   * 新版客户端的 downloadFile 交给系统（桌面是默认浏览器）。旧版客户端只能照旧 openUrl。
+   */
+  function downloadFile(url) {
+    if (Bridge.has('downloadFile')) Bridge.callSync('downloadFile', { url: url });
+    else openLink(url);
+  }
+
   window.PanDoc = {
     Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, esc: esc, ext: ext, kind: kind, icon: icon,
     fmtTime: fmtTime, fmtSize: fmtSize, PERM: PERM, toast: toast, isMobile: isMobile,
-    openDoc: openDoc, openLink: openLink, DOC_BASE: DOC_BASE
+    openDoc: openDoc, openLink: openLink, downloadFile: downloadFile, DOC_BASE: DOC_BASE
   };
 })();

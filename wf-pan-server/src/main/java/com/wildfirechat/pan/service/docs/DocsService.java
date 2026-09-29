@@ -196,6 +196,8 @@ public class DocsService {
         customization.put("forcesave", false);
         customization.put("feedback", false);
         customization.put("help", false);
+        // 「文件 → 提出功能建议」指向 ONLYOFFICE 的反馈站，在客户端的内置网页里打开是个白屏页
+        customization.put("suggestFeature", false);
         // 编辑器自己的标题行（快捷按钮 + 文件名 + 协作者）并进页签那一行，且不显示文件名：
         // 文件名已在客户端标题栏（或 open.html 的顶栏）里，不必再占一行
         customization.put("compactHeader", true);
