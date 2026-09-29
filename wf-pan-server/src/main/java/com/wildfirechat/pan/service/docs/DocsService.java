@@ -35,6 +35,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.InputStream;
 import java.net.URI;
@@ -451,6 +452,12 @@ public class DocsService {
             result.add(RecentDocVO.builder().file(fileService.toVO(f)).permission(perm).openedAt(r.getOpenedAt()).build());
         }
         return result;
+    }
+
+    /** 从自己的「最近打开」里移除，文件本身不动；再打开时会重新记上 */
+    @Transactional
+    public void removeRecent(String userId, Long fileId) {
+        recentRepository.deleteByUserIdAndFileId(userId, fileId);
     }
 
     private void touchRecent(String userId, Long fileId) {

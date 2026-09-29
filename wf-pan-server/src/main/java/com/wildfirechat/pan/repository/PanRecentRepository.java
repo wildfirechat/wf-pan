@@ -21,4 +21,8 @@ public interface PanRecentRepository extends JpaRepository<PanRecent, Long> {
     @Modifying
     @Query("DELETE FROM PanRecent r WHERE r.fileId = :fileId")
     void deleteByFileId(@Param("fileId") Long fileId);
+
+    @Modifying
+    @Query("DELETE FROM PanRecent r WHERE r.userId = :userId AND r.fileId = :fileId")
+    void deleteByUserIdAndFileId(@Param("userId") String userId, @Param("fileId") Long fileId);
 }

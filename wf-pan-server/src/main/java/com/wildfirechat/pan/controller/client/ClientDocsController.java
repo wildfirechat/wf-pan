@@ -84,4 +84,17 @@ public class ClientDocsController {
         }
         return Result.success(docsService.recent(userId, 50));
     }
+
+    /**
+     * 从最近打开里移除（只删这条记录，不删文件）
+     */
+    @PostMapping("/recent/remove")
+    public Result<Void> removeRecent(@Valid @RequestBody FileIdRequest request, HttpServletRequest httpRequest) {
+        String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
+        docsService.removeRecent(userId, request.getFileId());
+        return Result.success();
+    }
 }
