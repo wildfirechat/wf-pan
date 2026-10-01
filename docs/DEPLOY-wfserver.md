@@ -162,3 +162,66 @@ location / { proxy_pass http://127.0.0.1:8089; ... WebSocket 头 ... }        # 
 
 1. **手机端编辑需要 ONLYOFFICE 商业版**。手机网页端（移动端 H5）的编辑功能是 ONLYOFFICE **商业版/商业许可**能力，**社区版（Community）在手机网页端只能查看**，用户点编辑会弹许可提示。因此默认 `docs.mobile_edit=false`：**PC 端可正常编辑，移动端只读**。客户若要移动端编辑，需购买 ONLYOFFICE 商业许可，然后把 `docs.mobile_edit` 设为 `true` 并重启 wf-pan。
 2. **建议为在线文档加 CDN**。首次打开在线文档要下载 ONLYOFFICE 编辑器引擎，静态资源在十几 MB 量级（`fonts/217` gzip ≈ 9.26MB、`sdk-all.js` gzip ≈ 4.51MB），低带宽服务器上会「打开很久」，且 WKWebView 对超大单文件有缓存上限导致每次都重下。**建议把 `/docs/` 静态资源接到 CDN**（静态、带版本、`immutable`，回源一次即可），`/doc/` 保持走源站；没有 CDN 时只能升级源站带宽。详见第 7 节。
+
+## 9. 一次打开要下多少 / 怎么把流量降下来
+
+### 9.1 实测：打开一篇文档到底下了什么
+
+以 iOS 客户端（WKWebView，缓存失效时）打开一次为例，nginx 侧统计的传输量（gzip 后）：
+
+| 资源 | 传输 | 磁盘(未压缩) | 说明 |
+|---|---|---|---|
+| `sdkjs/word/sdk-all.js` | 4.71MB | 28.87MB | Word 引擎主体，最大单项 |
+| `sdkjs/word/sdk-all-min.js` | 0.64MB | 3.52MB | 移动端页面同时还会加载它 |
+| `sdkjs/common/libfont/engine/fonts.wasm` | 1.33MB | 3.61MB | 字体引擎 |
+| `web-apps/apps/documenteditor/mobile/dist/js/app.js` | 0.47MB | | 移动编辑器 |
+| `sdkjs/common/spell/spell/spell.wasm` | 0.23MB | | 拼写检查（已在编辑器配置里关掉 customization.spellcheck） |
+| `fonts/*`（文本文档用到的字体，按需） | 每个 0.12–0.2MB | | 西文字体 |
+| `fonts/217`（文泉驿正黑，中文回退） | **9.18MB** | 16.79MB | 文档里有中文时才会请求 |
+| `cache/files/.../Editor.bin` | ~0.1–0.3MB | | 文档内容本身 |
+
+合计：纯西文文档 ~7MB；**中文文档 ~16MB**。PC/Electron 端有 Chromium 的磁盘缓存 + Service Worker，
+第二次打开基本是 0；**移动端 WebView 如果缓存不生效，就会每次都重下这十几 MB**。
+
+### 9.2 已做：让 Service Worker 把大文件也缓存住（不再重复下载）
+
+ONLYOFFICE 自带的 `document_editor_service_worker.js` 对静态资源有单文件大小上限
+（`maxEntrySize = min(storage 配额 * 10%, 1GiB) / 8`）和 `isHealthy`（磁盘占用 <80%）判断，
+移动端配额估算值小/磁盘偏满时，`sdk-all.js`、`fonts/217` 这类大文件就**不写缓存**，于是每次打开都重下。
+
+`deploy/onlyoffice/` 下提供一个补丁与安装脚本：把带版本号的静态资源
+（`web-apps/` `sdkjs/` `fonts/` `sdkjs-plugins/` `dictionaries/`）改成**一律缓存**（单文件上限 512MB），
+带 docid 的动态文件仍走原来的 FIFO 逻辑。补丁版 Service Worker 放在宿主机、由 nginx 直接返回，
+**容器重建也不会丢**；官方原文件备份在 `/root/onlyoffice/sw-backup/`。
+
+```bash
+# 在 wfserver 上（脚本会 docker cp 官方文件 → 打补丁 → 写 nginx 覆盖 → reload）
+cd /root/pan-deploy/onlyoffice && ./install_doc_service_worker_cache.sh
+
+# 验证（应输出 1）
+curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worker.js | grep -c wf-patch
+```
+
+客户端侧配套（不加就仍然不会缓存）：
+
+- **Android**：WebView 必须开 DOM Storage（`setDomStorageEnabled(true)`，已加在 `WfcWebViewFragment`），
+  否则编辑器的 IndexedDB/Service Worker 缓存用不了。
+- **鸿蒙**：`WfcWebView` 已开 `domStorageAccess(true)`。
+- **iOS**：WKWebView 默认用持久化 `WKWebsiteDataStore`（只有登出/被踢时才清），无需改动。
+
+### 9.3 还能再降：可选的三条路
+
+1. **字体子集化（省最多，需要人工验收）**：`fonts/217` 等中文字体是最大单项（gzip 9.18MB）。
+   用 fonttools 对**同一款字体**做子集（ASCII + 标点 + GB18030 常用字，保留 `hhea/OS 2/name` 等度量表），
+   再按 ONLYOFFICE 的 32 字节 XOR 规则混淆并生成 `.gz`，可降到 ~2MB。
+   **关键**：必须同步修改 `sdkjs/common/AllFonts.js` 里该字体的码点覆盖区间，
+   否则客户端以为字体仍然覆盖全部字符、缺字时不会回退，就会出现上一次的「缺字/排版异常」。
+2. **客户端本地化编辑器资源（最彻底）**：客户端首次把 `/docs/**` 静态资源打包下载到 App 私有目录
+   （或直接打进安装包），之后由本地 HTTP/自定义 scheme 提供，做到「一次下载、永久使用」，甚至离线。
+   代价是每个客户端（iOS/Android/鸿蒙/PC）都要实现一份本地资源服务。
+3. **移动端只读改走 PDF 预览（对"看文档"最省）**：服务端用 ONLYOFFICE 的转换能力把 docx/xlsx/pptx
+   转成 PDF 并缓存，移动端只下载几百 KB 的 PDF 用现成预览器打开（编辑仍走 ONLYOFFICE）。
+   只读场景可从 ~16MB 降到 0.2–1MB。
+
+> 注意：修改 sdkjs / 重新打包编辑器属于修改 ONLYOFFICE（AGPL v3）代码，
+> 对外提供修改版时需按 AGPL 要求提供对应源码与许可声明；商用前请和法务确认。
