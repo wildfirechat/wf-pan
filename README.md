@@ -170,7 +170,7 @@ docs.jwt_secret=与 ONLYOFFICE 相同的 JWT 密钥（两边必须一致，HS256
 docs.server_public_path=/docs                 # 浏览器加载编辑器资源的同源路径（NG 反代到 ONLYOFFICE）
 docs.server_internal_url=http://wf-docs       # 本服务调 ONLYOFFICE 的内网地址（转换、取保存结果）
 docs.callback_base_url=http://wf-pan:8081     # ONLYOFFICE 回连本服务的内网地址（取文件、保存回调）
-docs.mobile_edit=false                        # 社区版手机网页端不能编辑，默认关闭
+docs.mobile_edit=false                        # 手机端是否允许编辑：需要 ONLYOFFICE 商业版/商业许可（社区版手机网页端会弹许可提示），默认关闭=手机端只读
 ```
 
 #### 请求流向：谁经 wf-pan，谁直连 ONLYOFFICE
@@ -231,9 +231,10 @@ location / {
    （用容器网络名，如 `http://wf-pan:8081`，不要用 `127.0.0.1`）。
 2. **JWT 必须一致**：ONLYOFFICE 侧 `JWT_ENABLED=true` 且 `JWT_SECRET` 与 `docs.jwt_secret` 相同，否则取文件/回调全部 403。
 3. **资源要求**：ONLYOFFICE 建议 ≥2 核 / ≥4GB，数据卷要持久化（字体、缓存）。
-4. **手机端**：社区版手机网页端不能编辑，`docs.mobile_edit=false`（默认）时移动端只读。
+4. **手机端编辑需要商业版**：ONLYOFFICE 手机网页端的编辑能力属于**商业版/商业许可**功能，社区版（Community）在手机网页端只能查看，点编辑会弹许可提示。所以 `docs.mobile_edit=false`（默认）时移动端只读、PC 端可编辑；已购商业许可后改成 `true` 即可放开（重启生效）。
 5. **路径前缀**：若网盘按 `pan.public_path=/pan` 反代部署，`docs.server_public_path` 与 nginx 的 `/docs/` 需与之一致。
 6. **允许内网地址**：ONLYOFFICE 必须开 `ALLOW_PRIVATE_IP_ADDRESS=true`（必要时 `ALLOW_META_IP_ADDRESS=true`）。否则它拒绝从内网取 `document.url`，表现就是打开文档报「下载失败」——服务端日志里看不到 `/internal/docs/file/...` 请求。
+7. **建议加 CDN**：在线文档首次打开要拉 ONLYOFFICE 的 `sdk-all.js`、字体等静态资源，体积在十几 MB 量级，带宽低时会明显卡顿。建议把 `/docs/`（ONLYOFFICE 静态资源）接到 CDN 回源加速（`/doc/` 保持走源站）；注意 WKWebView 对超大单文件有缓存上限，超大资源每次打开都会重新下载，走 CDN 收益最明显。
 
 #### 按链接只读打开
 

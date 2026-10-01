@@ -125,6 +125,11 @@ java -jar target/wf-pan-server-1.0.0.jar
 
 `/internal/docs/**` 只给 ONLYOFFICE 在容器网络内调用（JWT + 地址签名），不要经反向代理暴露。
 
+### 部署与许可注意事项
+
+1. **手机端编辑需要商业版**：ONLYOFFICE 手机网页端（移动端 H5）的编辑能力属于**商业版/商业许可**功能，社区版（Community）在手机网页端只能查看，点击编辑会弹出许可提示。因此 `docs.mobile_edit` 默认 `false`（手机端只读，PC 端可编辑）；如果已购买 ONLYOFFICE 商业许可并希望手机端也能编辑，把它改成 `true` 并重启服务即可（服务端脚本：`enable_mobile_edit.sh` / `disable_mobile_edit.sh`）。
+2. **建议为静态资源加 CDN**：在线文档首次打开时，ONLYOFFICE 的 `sdk-all.js`/字体等静态资源体积较大（十几 MB 量级），服务器带宽低时打开会很慢。建议把 `/docs/`（ONLYOFFICE 静态资源）放到 CDN 上回源加速，`/doc/`（网盘提供的 H5 页面与接口）保持走源站即可。注意 WKWebView 对超大单文件有缓存上限，超大资源每次打开都会重新下载，CDN 收益最明显。
+
 ## 数据库表结构
 
 - `sys_config`: 系统配置

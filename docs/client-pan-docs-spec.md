@@ -696,8 +696,13 @@ Server rejects deleting a non-empty folder (message e.g. "文件夹非空，请�
 
 ### 7.6 Mobile webview editor limitations
 
-- ONLYOFFICE community mobile web cannot edit; server forces read-only and the reason is `mobile`
+- ONLYOFFICE community mobile web cannot edit; the mobile web editing feature is a **commercial-license**
+  capability of ONLYOFFICE Docs. Server forces read-only and the reason is `mobile`
   unless `docs.mobile_edit=true` (`DocsService.java:156-168`; `DocsConfig.java:34-36`).
+  Customers who need mobile editing must buy an ONLYOFFICE commercial license and then set `docs.mobile_edit=true`.
+- Opening the docs editor also has a bandwidth cost: the first open pulls the ONLYOFFICE engine
+  (`fonts/217` gzip ≈ 9.26MB, `sdk-all.js` gzip ≈ 4.51MB, …). Serving `/docs/` static assets from a
+  **CDN** is recommended for low-bandwidth hosts (WKWebView also re-downloads over-sized entries).
 - The docs home hides the create buttons until it confirms `mobileEdit` (`pan_docs_screen.dart:50,81-88`;
   `doc-web/index.html:143-145`).
 - Android WebView's ~20MB HTTP cache is too small for the editor; the page registers a service

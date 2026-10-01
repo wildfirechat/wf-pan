@@ -35,7 +35,7 @@ docs.jwt_secret=<与 ONLYOFFICE 相同，见 /root/onlyoffice/jwt_secret>
 docs.server_public_path=/docs
 docs.server_internal_url=http://127.0.0.1:8089
 docs.callback_base_url=http://172.17.0.1:8083      # 容器回连宿主
-docs.mobile_edit=false
+docs.mobile_edit=false                             # 手机端只读：手机网页端编辑属 ONLYOFFICE 商业版功能，社区版会弹许可提示
 docs.hide_chat=true
 ```
 
@@ -100,6 +100,8 @@ location / { proxy_pass http://127.0.0.1:8089; ... WebSocket 头 ... }        # 
 4. **磁盘**：拉取 ONLYOFFICE 后 `/` 使用率约 78%（剩 ~6.8G），注意清理。
 5. **安全**：wf-pan 管理员共享密码仍是默认 `admin123`（管理端 8084 未对外），建议尽快在后台修改。
 6. **「下载失败」排查**：iOS/客户端打开在线文档报“下载失败”，先看 wf-pan 是否收到 `/internal/docs/file/...`；若没有，多半是 ONLYOFFICE 拒绝了内网地址。确认 `docker exec wf-docs grep allowPrivateIPAddress /etc/onlyoffice/documentserver/local.json` 为 `true`（重建容器时带 `ALLOW_PRIVATE_IP_ADDRESS=true`）。
+7. **手机端编辑需要商业版**：ONLYOFFICE 手机网页端的**编辑**能力属于**商业版/商业许可**功能，社区版（Community）在手机网页端只能查看，点编辑会弹许可提示。因此 `docs.mobile_edit=false`（默认，移动端只读、PC 端可编辑）；若客户已购 ONLYOFFICE 商业许可并希望手机端也能编辑，改 `true` 并重启 wf-pan（服务器上可用 `enable_mobile_edit.sh` / `disable_mobile_edit.sh`）。
+8. **建议加 CDN**：在线文档首次打开要拉 ONLYOFFICE 的 `sdk-all.js`、字体等静态资源（十几 MB 量级），低带宽下打开很慢（详见第 7 节）。建议把 `/docs/`（静态、带版本、`immutable`）接到 CDN 回源加速，`/doc/` 保持走源站；WKWebView 对超大单文件有缓存上限，超大资源每次打开都会重下，走 CDN 收益最明显。
 
 ## 7. 打开文档慢 / 带宽分析
 
@@ -137,3 +139,26 @@ location / { proxy_pass http://127.0.0.1:8089; ... WebSocket 头 ... }        # 
 - **结论**：`sdk-all.js`(磁盘 28.87MB / gzip ~4.5MB) 是 ONLYOFFICE 编辑器**固有加载**——连官方 `preload.html`、`cache-scripts.html` 都是「同时加载 sdk-all-min.js + sdk-all.js」并置 `AscNotLoadAllScript=true`，因此**不能安全跳过**。
 - 这些静态资源带版本号且 `Cache-Control: immutable, max-age=31536000`，**首次打开后会被客户端缓存**；之后同一版本再打开只应下文档内容(~0.26MB)+api.js(13KB)。若第二次仍全量重下，需排查客户端缓存。
 - 进一步的量级优化只能靠 **CDN** 或 **提升源站带宽**；`sdk-all-min.js` 无法再裁剪。
+
+### 中文字体（fonts/217）——子集化方案已放弃
+
+在线文档的中文回退字体 `fonts/217`（文泉驿正黑 WenQuanYi Zen Hei）原始 16.79MB / gzip 9.26MB，超过 WebKit 单条缓存上限，**每次打开都重下**。
+
+尝试过子集化（找到 ONLYOFFICE 只对字体**前 32 字节 XOR 固定密钥** `a066d620149647fa9569b850b0414948`，据此产出了同格式子集）：
+
+| 档位 | 原始 | gzip | 结果 |
+|---|---|---|---|
+| full | 16.79MB | 9.26MB | 原字体 |
+| gbk（约 2.1 万汉字） | 7.66MB | 4.14MB | **实测有排版问题** |
+| gb2312（6763 汉字） | 2.31MB | 1.30MB | **实测缺字** |
+
+**结论：子集化会影响排版/缺字，已全部放弃，恢复使用原字体 `full`。** nginx 的字体覆盖 location、`/root/onlyoffice/fonts`、`set-font.sh` 均已移除；`/docs/*/fonts/217` 由 ONLYOFFICE 原样提供（16,791,251 B，`immutable`）。此问题只能靠 **CDN / 升带宽** 解决。
+
+> 方案 B（只用 `sdk-all-min.js` 以跳过 28.87MB 的 `sdk-all.js`）**不可行**：`sdk-all-min.js` 只是精简子集（约为全量代码的 11%，`AscWord` 出现次数 90 vs 2803），Word 引擎主体在全量文件里，跳过会导致编辑器异常。
+
+## 8. 许可与带宽：给客户的结论
+
+给客户交付/报价时请说明以下两点：
+
+1. **手机端编辑需要 ONLYOFFICE 商业版**。手机网页端（移动端 H5）的编辑功能是 ONLYOFFICE **商业版/商业许可**能力，**社区版（Community）在手机网页端只能查看**，用户点编辑会弹许可提示。因此默认 `docs.mobile_edit=false`：**PC 端可正常编辑，移动端只读**。客户若要移动端编辑，需购买 ONLYOFFICE 商业许可，然后把 `docs.mobile_edit` 设为 `true` 并重启 wf-pan。
+2. **建议为在线文档加 CDN**。首次打开在线文档要下载 ONLYOFFICE 编辑器引擎，静态资源在十几 MB 量级（`fonts/217` gzip ≈ 9.26MB、`sdk-all.js` gzip ≈ 4.51MB），低带宽服务器上会「打开很久」，且 WKWebView 对超大单文件有缓存上限导致每次都重下。**建议把 `/docs/` 静态资源接到 CDN**（静态、带版本、`immutable`，回源一次即可），`/doc/` 保持走源站；没有 CDN 时只能升级源站带宽。详见第 7 节。
