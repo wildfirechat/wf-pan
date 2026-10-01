@@ -21,8 +21,8 @@
 
 | 客户端 | 配置 | 门控函数 | 入口（PC / 移动） |
 |---|---|---|---|
-| vue-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | 移动：设置/“我”页 |
-| vue-pc-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | PC：左侧栏「网盘」「在线文档」 |
+| vue-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | Web：左侧图标导航栏「网盘」「在线文档」（不在设置里） |
+| vue-pc-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | PC：左侧栏「网盘」「在线文档」；文档在**独立窗口**打开（一文档一窗口） |
 | android-chat | `Config.PAN_SERVER_ADDRESS` / `_BACKUP_ADDRESS` | `Config.isPanConfigured()` | 移动：“我”页 OptionItemView |
 | ios-chat | 已有 `PAN_SERVER_ADDRESS`（沿用） | `PanService.isPanConfigured`（新增/沿用） | 移动：发现页 + 资料页 |
 | uni-chat-x | `Config.PAN_SERVER` / `_BACKUP` + `PAN_DOC_BASE` / `_BACKUP` | `Config.isPanEnabled()` / `isPanDocEnabled()` | 移动：“我的”页 |
