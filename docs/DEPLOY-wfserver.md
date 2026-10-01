@@ -37,6 +37,8 @@ docs.server_internal_url=http://127.0.0.1:8089
 docs.callback_base_url=http://172.17.0.1:8083      # 容器回连宿主
 docs.mobile_edit=false                             # 手机端只读：手机网页端编辑属 ONLYOFFICE 商业版功能，社区版会弹许可提示
 docs.hide_chat=true
+docs.mobile_pdf_preview=true                       # 手机端只读打开先转 PDF 预览（几百 KB），转不了自动退回编辑器
+docs.preview_dir=/root/pan/preview                 # 预览 PDF 缓存目录（可按文件+版本复用；留空用系统临时目录）
 ```
 
 ## 2. ONLYOFFICE Docs（Docker）
