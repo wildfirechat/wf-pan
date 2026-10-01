@@ -152,7 +152,25 @@ location / { proxy_pass http://127.0.0.1:8089; ... WebSocket 头 ... }        # 
 | gbk（约 2.1 万汉字） | 7.66MB | 4.14MB | **实测有排版问题** |
 | gb2312（6763 汉字） | 2.31MB | 1.30MB | **实测缺字** |
 
-**结论：子集化会影响排版/缺字，已全部放弃，恢复使用原字体 `full`。** nginx 的字体覆盖 location、`/root/onlyoffice/fonts`、`set-font.sh` 均已移除；`/docs/*/fonts/217` 由 ONLYOFFICE 原样提供（16,791,251 B，`immutable`）。此问题只能靠 **CDN / 升带宽** 解决。
+**第一次尝试（只换字体文件、没动字体表）失败并回滚**：渲染出现缺字/排版异常，根因是客户端
+`AllFonts.js` 里仍认为该字体覆盖全部字符，缺字时不会回退。
+
+**第二次实现（已上线，2026-10-02）**：`deploy/onlyoffice/` 下提供完整流水线。
+
+- `build_font_subsets.py`：还原字体（前 32 字节 XOR 混淆）→ fonttools 子集（拉丁/标点/假名/谚文/CJK 统一表意
+  文字共 3.5 万码点，保留 `hhea/OS2/name/cmap` 等度量与名称表）→ 重新混淆 → gzip -9。
+  TTC 只保留被使用的 face 0 输出单 face（整体子集化会让各 face 各存一份字形表，反而更大）。
+- `install_font_subsets.sh`：把子集字体 + 修正后的 `AllFonts.js` 放到宿主机、由 nginx 覆盖
+  `/docs/<版本>/fonts/217` 与 `/docs/<版本>/sdkjs/common/AllFonts.js`（容器重建不丢），
+  并把 `WenQuanYi Zen Hei Mono/Sharp` 的 face 改成 0（文件已只剩 face 0）。
+- `uninstall_font_subsets.sh`：一条命令回滚。
+
+实测：`fonts/217`（文泉驿正黑）**9,178,672 B → 4,367,060 B（gzip，-52%）**，原始 16.79MB → 8.47MB；
+字形 4.2 万 → 3.6 万，码点 4.2 万 → 3.4 万（覆盖全部 CJK 统一表意文字、假名、谚文、常用符号）。
+子集只影响生僻字（CJK 扩展 B 及以后）；`134/135`（NanumGothic）、`179/182`（Noto Sans KR）主要是谚文字形，
+子集化只能省 5%~10%，**没有启用**。
+
+> 子集化后请用几篇有代表性的中文文档确认排版；有问题直接跑 `uninstall_font_subsets.sh` 回滚。
 
 > 方案 B（只用 `sdk-all-min.js` 以跳过 28.87MB 的 `sdk-all.js`）**不可行**：`sdk-all-min.js` 只是精简子集（约为全量代码的 11%，`AscWord` 出现次数 90 vs 2803），Word 引擎主体在全量文件里，跳过会导致编辑器异常。
 
