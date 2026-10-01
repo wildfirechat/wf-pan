@@ -5,6 +5,7 @@ import com.wildfirechat.pan.dto.Result;
 import com.wildfirechat.pan.dto.request.CreateDocRequest;
 import com.wildfirechat.pan.dto.request.EditorConfigRequest;
 import com.wildfirechat.pan.dto.request.FileIdRequest;
+import com.wildfirechat.pan.dto.request.ViewUrlRequest;
 import com.wildfirechat.pan.dto.vo.FileVO;
 import com.wildfirechat.pan.dto.vo.RecentDocVO;
 import com.wildfirechat.pan.filter.ClientAuthFilter;
@@ -52,7 +53,22 @@ public class ClientDocsController {
         return Result.success(docsService.openEditor(request.getFileId(), userId, request.getPlatform(),
             Boolean.TRUE.equals(request.getView())));
     }
-    
+
+    /**
+     * 按链接只读打开在线文档：文件不在网盘里（聊天里的文件消息、外部链接），
+     * 地址须在受信任的存储前缀下；内容由服务端代理给 ONLYOFFICE，只读、不回写。
+     */
+    @PostMapping("/view-url")
+    public Result<Map<String, Object>> viewUrl(@Valid @RequestBody ViewUrlRequest request,
+                                               HttpServletRequest httpRequest) {
+        String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
+        return Result.success(docsService.openReadOnlyUrl(request.getUrl(), request.getName(),
+            userId, request.getPlatform()));
+    }
+
     /**
      * 旧格式（doc/xls/ppt/wps…）转成 OOXML，另存为新文件
      */

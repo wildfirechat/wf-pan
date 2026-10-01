@@ -63,6 +63,35 @@ public class SignService {
         return constEq(signEditorFile(fileId, versionNo, expireEpochSec), sig);
     }
 
+    /**
+     * 在线文档「按链接只读打开」时取文件地址的签名：绑定来源地址（的 SHA-256）与到期时间。
+     *
+     * 地址只出现在签给编辑器的配置里 —— 拿到它就说明这个地址已经过了受信任前缀校验，
+     * 所以校验时不必再传原文（ONLYOFFICE 不支持很长的 query）。
+     */
+    public String signEditorUrl(String url, long expireEpochSec) {
+        return Hs256Jwt.hmacB64("ofu|" + sha256Hex(url) + "|" + expireEpochSec, secret);
+    }
+
+    public boolean verifyEditorUrl(String url, long expireEpochSec, String sig) {
+        if (url == null || url.isEmpty() || sig == null) {
+            return false;
+        }
+        if (expireEpochSec < System.currentTimeMillis() / 1000) {
+            return false;
+        }
+        return constEq(signEditorUrl(url, expireEpochSec), sig);
+    }
+
+    private static String sha256Hex(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(s.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** 网页会话 Cookie 值：userId.到期时间.签名 */
     public String issueWebSession(String userId) {
         long exp = System.currentTimeMillis() / 1000 + docsConfig.getWebSessionTtlSeconds();

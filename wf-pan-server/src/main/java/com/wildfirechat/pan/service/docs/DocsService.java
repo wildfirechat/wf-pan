@@ -42,6 +42,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -49,6 +50,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -199,6 +201,9 @@ public class DocsService {
         customization.put("help", false);
         // 「文件 → 提出功能建议」指向 ONLYOFFICE 的反馈站，在客户端的内置网页里打开是个白屏页
         customization.put("suggestFeature", false);
+        // 省流量：关掉拼写检查（会额外拉 spell.wasm/词典）与插件（marketplace/插件资源）
+        customization.put("spellcheck", false);
+        customization.put("plugins", false);
         // 编辑器自己的标题行（快捷按钮 + 文件名 + 协作者）并进页签那一行，且不显示文件名：
         // 文件名已在客户端标题栏（或 open.html 的顶栏）里，不必再占一行
         customization.put("compactHeader", true);
@@ -244,6 +249,151 @@ public class DocsService {
         result.put("canShare", permissionService.canShare(userId, file));
         result.put("convertible", CONVERTIBLE.contains(ext) && objectStoreService.isSupported());
         return result;
+    }
+
+    // ------------------------------------------------------------------ 按链接只读打开
+
+    /**
+     * 按链接**只读**打开一个在线文档：文件不在网盘里（没有 fileId），所以没有权限、没有版本、
+     * 也不回写 —— 只要求地址在受信任的存储前缀下（与「直接引用存储地址」同一条校验，防 SSRF）。
+     *
+     * 内容不让 ONLYOFFICE 直接去取来源地址，而是由本服务代理（见 internalReadUrl）：
+     * 跨网 / 自签证书 / 带过期签名的地址都能用，也免得 ANY 地址都被 ONLYOFFICE 拉一遍。
+     */
+    public Map<String, Object> openReadOnlyUrl(String url, String name, String userId, String platform) {
+        requireEnabled();
+        if (url == null || url.isEmpty()) {
+            throw new BusinessException("文件地址不能为空");
+        }
+        storageService.resolveReference(url);
+        String fileName = (name != null && !name.isEmpty()) ? name : url;
+        String ext = ext(fileName);
+        String documentType = documentType(ext);
+        if (documentType == null) {
+            throw new BusinessException("该格式不支持在线打开");
+        }
+        boolean mobile = "mobile".equalsIgnoreCase(platform);
+        String userName = imUserService.getUserDisplayName(userId);
+
+        Map<String, Object> permissions = new LinkedHashMap<>();
+        permissions.put("edit", false);
+        permissions.put("comment", false);
+        permissions.put("review", false);
+        permissions.put("fillForms", false);
+        permissions.put("modifyFilter", false);
+        permissions.put("modifyContentControl", false);
+        permissions.put("download", true);
+        permissions.put("print", true);
+        permissions.put("copy", true);
+        permissions.put("chat", false);
+
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("fileType", ext);
+        document.put("key", urlDocKey(url));
+        document.put("title", fileName);
+        document.put("url", internalReadUrl(url));
+        document.put("permissions", permissions);
+
+        Map<String, Object> user = new LinkedHashMap<>();
+        user.put("id", userId);
+        user.put("name", userName);
+
+        Map<String, Object> customization = new LinkedHashMap<>();
+        customization.put("autosave", false);
+        customization.put("forcesave", false);
+        customization.put("feedback", false);
+        customization.put("help", false);
+        customization.put("suggestFeature", false);
+        // 省流量：关掉拼写检查与插件
+        customization.put("spellcheck", false);
+        customization.put("plugins", false);
+        customization.put("compactHeader", true);
+        customization.put("toolbarHideFileName", true);
+        if (docsConfig.isHideBranding()) {
+            customization.put("logo", Map.of("visible", false));
+            customization.put("about", false);
+        }
+
+        Map<String, Object> editorConfig = new LinkedHashMap<>();
+        editorConfig.put("mode", "view");
+        editorConfig.put("lang", "zh-CN");
+        editorConfig.put("region", "zh-CN");
+        editorConfig.put("user", user);
+        editorConfig.put("customization", customization);
+        // 只读 → 不注册 callbackUrl（与网盘文件只读打开时一致，ONLYOFFICE 不会回写）
+
+        Map<String, Object> config = new LinkedHashMap<>();
+        config.put("type", mobile ? "mobile" : "desktop");
+        config.put("documentType", documentType);
+        config.put("document", document);
+        config.put("editorConfig", editorConfig);
+        config.put("width", "100%");
+        config.put("height", "100%");
+        config.put("token", Hs256Jwt.sign(config, docsConfig.getJwtSecret()));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("apiUrl", docsConfig.getServerPublicPath() + "/web-apps/apps/api/documents/api.js");
+        result.put("config", config);
+        result.put("fileName", fileName);
+        result.put("canEdit", false);
+        result.put("viewReason", "link");
+        result.put("canShare", false);
+        result.put("convertible", false);
+        return result;
+    }
+
+    /**
+     * ONLYOFFICE 的文档 key：同一个地址复用同一份缓存（内容变了要换地址），
+     * 只能用 [0-9a-zA-Z_-]，长度上限 128。
+     */
+    private String urlDocKey(String url) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(url.getBytes(StandardCharsets.UTF_8));
+            return "u" + HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** ONLYOFFICE 按链接只读打开时取文件的地址（本服务代理，带签名与有效期） */
+    private String internalReadUrl(String url) {
+        long expire = System.currentTimeMillis() / 1000 + EDITOR_FILE_URL_TTL_SECONDS;
+        String encoded = Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(url.getBytes(StandardCharsets.UTF_8));
+        return internalBase() + "/internal/docs/raw?u=" + encoded + "&e=" + expire
+            + "&s=" + signService.signEditorUrl(url, expire);
+    }
+
+    /**
+     * 把来源地址的内容读出来交给 ONLYOFFICE（internalReadUrl 那个地址的处理器）。
+     *
+     * 先按对象存储读（同一套存储凭据，不依赖来源主机能否被容器访问、证书是否自签），
+     * 读不到再走 HTTP GET；两条路都只允许已通过受信任前缀校验的地址。
+     */
+    public InputStream openReadOnlySource(String url) {
+        storageService.resolveReference(url);
+        try {
+            return objectStoreService.open(url, null, null);
+        } catch (Exception e) {
+            log.info("按链接只读打开：对象存储读不到，改走 HTTP。url={} err={}", url, e.getMessage());
+        }
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofMinutes(2))
+                .GET()
+                .build();
+            HttpResponse<InputStream> resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            if (resp.statusCode() / 100 != 2) {
+                resp.body().close();
+                throw new BusinessException("取文件失败: HTTP " + resp.statusCode());
+            }
+            return resp.body();
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("取文件失败: " + e.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------ 保存回调

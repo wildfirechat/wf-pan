@@ -19,7 +19,12 @@
 (function () {
   'use strict';
   var D = window.PanDoc;
-  var fileId = Number(new URLSearchParams(location.search).get('fileId'));
+  var params = new URLSearchParams(location.search);
+  var fileId = Number(params.get('fileId'));
+  // 按链接只读打开：文件不在网盘里（聊天里的文件消息、外部地址），只有 url + name
+  var viewUrl = params.get('url') || '';
+  var viewName = params.get('name') || '';
+  var readOnlyByUrl = !fileId && !!viewUrl;
   var info = null;
   var docEditor = null;
   var apiLoaded = null;
@@ -41,7 +46,8 @@
     convertible: '只读 · 旧格式，转换后可编辑',
     format: '只读 · 该格式不支持在线编辑',
     mobile: '只读 · 手机上只能查看，请在电脑上编辑',
-    requested: '只读'
+    requested: '只读',
+    link: '只读 · 按链接打开'
   };
   var SOURCE = { UPLOAD: '上传', EDIT: '在线编辑', RESTORE: '恢复版本', CONVERT: '转换' };
   // 自动化测试读这里的编辑器事件
@@ -72,7 +78,7 @@
 
   function onAction(id) {
     if (id === 'download') download();
-    else if (!info) return;
+    else if (!info || !fileId) return;
     else if (id === 'share') openShare();
     else if (id === 'versions') openVersions();
     else if (id === 'convert') convert();
@@ -100,15 +106,21 @@
   }
 
   function open() {
-    if (!fileId) { fatal('缺少文件参数'); return; }
-    D.api('docs/editor-config', { fileId: fileId, platform: D.isMobile() ? 'mobile' : 'pc' }).then(function (res) {
+    if (!fileId && !viewUrl) { fatal('缺少文件参数'); return; }
+    var req = readOnlyByUrl
+      ? D.api('docs/view-url', { url: viewUrl, name: viewName, platform: D.isMobile() ? 'mobile' : 'pc' })
+      : D.api('docs/editor-config', { fileId: fileId, platform: D.isMobile() ? 'mobile' : 'pc' });
+    req.then(function (res) {
       info = res;
       document.title = res.fileName;
       // 可编辑是常态，不标（编辑器自己有「编辑 ▾」）；只读才说明原因
+      // 按链接只读打开没有网盘文件：转换/历史版本/下载/分享都用不了，一个都不给
       var actions = [];
-      if (res.convertible && !D.isMobile()) actions.push({ id: 'convert', text: '转换后编辑', icon: 'convert' });
-      actions.push({ id: 'versions', text: '历史版本', icon: 'history' }, { id: 'download', text: '下载', icon: 'download' });
-      if (res.canShare) actions.push({ id: 'share', text: '分享', icon: 'share', primary: true });
+      if (!readOnlyByUrl) {
+        if (res.convertible && !D.isMobile()) actions.push({ id: 'convert', text: '转换后编辑', icon: 'convert' });
+        actions.push({ id: 'versions', text: '历史版本', icon: 'history' }, { id: 'download', text: '下载', icon: 'download' });
+        if (res.canShare) actions.push({ id: 'share', text: '分享', icon: 'share', primary: true });
+      }
       showHeader(res.fileName, res.canEdit ? '' : (REASON[res.viewReason] || '只读'), actions);
       return loadApi(res.apiUrl).then(function () {
         var cfg = res.config;
@@ -133,7 +145,7 @@
         cacheEditorAssets();
       });
     }).catch(function (e) {
-      fatal(e.notInClient ? '请在客户端中打开' : e.message, !e.notInClient);
+      fatal(e.notInClient ? '请在客户端中打开' : e.message, !e.notInClient && !readOnlyByUrl);
     });
   }
 

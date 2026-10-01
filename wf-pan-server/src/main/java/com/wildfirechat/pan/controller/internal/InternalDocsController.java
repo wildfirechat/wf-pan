@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Map;
 
 /**
@@ -70,6 +72,46 @@ public class InternalDocsController {
         response.setContentType("application/octet-stream");
         try (InputStream in = objectStoreService.open(storageUrl, null, null)) {
             in.transferTo(response.getOutputStream());
+        }
+    }
+
+    /**
+     * ONLYOFFICE 按链接只读打开时取文件：内容由本服务代理（不让 ONLYOFFICE 直连来源地址）。
+     * 地址上的签名绑定来源地址与有效期；来源前缀在组装配置时与这里各校验一次。
+     */
+    @GetMapping("/raw")
+    public void raw(@RequestParam(value = "u", required = false) String encodedUrl,
+                    @RequestParam(value = "e", defaultValue = "0") long expire,
+                    @RequestParam(value = "s", required = false) String sig,
+                    @RequestHeader(value = "Authorization", required = false) String authorization,
+                    HttpServletRequest request, HttpServletResponse response) throws Exception {
+        if (!fromInside(request)) {
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
+        }
+        String url;
+        try {
+            url = encodedUrl == null || encodedUrl.isEmpty() ? null
+                : new String(Base64.getUrlDecoder().decode(encodedUrl), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            url = null;
+        }
+        if (url == null || !signService.verifyEditorUrl(url, expire, sig)) {
+            log.warn("ONLYOFFICE 按链接取文件：地址签名无效或已过期");
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        if (docsService.verifyInbound(authorization, null) == null) {
+            log.warn("ONLYOFFICE 按链接取文件：JWT 校验失败");
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
+        }
+        response.setContentType("application/octet-stream");
+        try (InputStream in = docsService.openReadOnlySource(url)) {
+            in.transferTo(response.getOutputStream());
+        } catch (Exception e) {
+            log.warn("ONLYOFFICE 按链接取文件失败: {}", e.getMessage());
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
         }
     }
 

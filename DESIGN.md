@@ -175,6 +175,18 @@ CREATE TABLE pan_operation_log (
 | POST | `/api/v1/files/{id}/rename` | 重命名文件/文件夹 |
 | POST | `/api/v1/files/url` | 获取下载URL |
 
+### 5.3 在线文档（ONLYOFFICE）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/docs/create` | 用空白模板新建 docx/xlsx/pptx |
+| POST | `/api/v1/docs/editor-config` | 打开编辑器（返回签名的编辑器配置） |
+| POST | `/api/v1/docs/view-url` | 按链接**只读**打开在线文档（文件不在网盘里），`{url, name?, platform?}`；地址须在 `media.trusted_url_prefixes` 下，内容由服务端代理给 ONLYOFFICE，不回写 |
+| POST | `/api/v1/docs/convert` | 旧格式转为 OOXML 另存 |
+| POST | `/api/v1/docs/recent` `/recent/remove` | 最近打开 |
+| GET | `/doc/open` | 在线文档 H5 页面（`?fileId=` 网盘文件，或 `?url=&name=` 按链接只读） |
+| GET/POST | `/internal/docs/**` | 只给 ONLYOFFICE 在容器网络内调用（JWT + 地址签名），NG 不转发 |
+
 ## 六、业务规则
 
 1. **文件夹删除**: 非空文件夹不能删除，必须先删除内部文件

@@ -137,6 +137,111 @@ java -jar target/wf-pan-server-1.0.0.jar
 - 支持文件跨空间复制（可配置是否复制物理文件）
 - 完整的配额统计
 
+### 在线文档（ONLYOFFICE）
+
+启用后可在客户端工作台里在线打开、编辑网盘中的 docx/xlsx/pptx，支持历史版本与旧格式转换；
+文件不在网盘里时（聊天里的文件消息、外部链接）也能**按链接只读打开**。
+
+#### 依赖：ONLYOFFICE Docs（Document Server）
+
+在线文档需要一个额外的 **ONLYOFFICE Docs** 服务，官方以 **Docker** 方式部署。wf-pan 本身不含编辑器引擎，
+只负责页面、鉴权、签名、内容代理与保存回调。不需要在线文档时把 `docs.enabled` 置为 `false`（网盘其它功能不受影响）。
+
+```bash
+docker run -d --name wf-docs --restart=always \
+  -p 8089:80 \
+  -e JWT_ENABLED=true \
+  -e JWT_SECRET='<与 docs.jwt_secret 完全一致>' \
+  -e ALLOW_PRIVATE_IP_ADDRESS=true \
+  -e ALLOW_META_IP_ADDRESS=true \
+  -v /data/onlyoffice/data:/var/www/onlyoffice/Data \
+  -v /data/onlyoffice/logs:/var/log/onlyoffice \
+  onlyoffice/documentserver
+```
+
+> `ALLOW_PRIVATE_IP_ADDRESS=true` **必须**：`docs.callback_base_url` 通常是内网地址（容器网关或服务名），
+> ONLYOFFICE 默认拒绝访问内网地址，会导致打开文档时取不到内容、编辑器报「下载失败」。
+
+wf-pan 侧配置：
+
+```properties
+docs.enabled=true
+docs.jwt_secret=与 ONLYOFFICE 相同的 JWT 密钥（两边必须一致，HS256）
+docs.server_public_path=/docs                 # 浏览器加载编辑器资源的同源路径（NG 反代到 ONLYOFFICE）
+docs.server_internal_url=http://wf-docs       # 本服务调 ONLYOFFICE 的内网地址（转换、取保存结果）
+docs.callback_base_url=http://wf-pan:8081     # ONLYOFFICE 回连本服务的内网地址（取文件、保存回调）
+docs.mobile_edit=false                        # 社区版手机网页端不能编辑，默认关闭
+```
+
+#### 请求流向：谁经 wf-pan，谁直连 ONLYOFFICE
+
+业务与文件内容都经 wf-pan 中转；只有「编辑器前端资源 + 协同编辑通道」由客户端直连 ONLYOFFICE。
+
+| 请求 | 方向 | 说明 |
+|---|---|---|
+| `/api/v1/**`（空间/文件/分享/版本/文档接口） | 客户端 → wf-pan | 全部业务接口 |
+| `/doc/**`、`POST /doc/session` | 客户端 → wf-pan | 文档 H5 页面与会话 Cookie |
+| `/internal/docs/file/{fileId}`、`/internal/docs/raw` | **ONLYOFFICE → wf-pan** | 文档内容由 wf-pan 从对象存储读出再转发（不把原始地址交给 ONLYOFFICE） |
+| `/internal/docs/callback` | **ONLYOFFICE → wf-pan** | 保存回调 |
+| ONLYOFFICE `/cache/...`（内网地址） | **wf-pan → ONLYOFFICE** | 下载保存结果、格式转换 |
+| `/pan/dl/{fileId}`（`/files/url` 返回的签名短链） | 客户端 → wf-pan | wf-pan 从私有桶读出转发 |
+| `/docs/web-apps/apps/api/documents/api.js` 及 `/docs/**` 静态资源 | 客户端 → ONLYOFFICE | 编辑器 JS/字体/样式，浏览器直接加载 |
+| 编辑器 iframe 的协同编辑 WebSocket | 客户端 → ONLYOFFICE | 实时协同不经过 wf-pan |
+
+> 下载例外：对象存储未配置或当前类型不支持服务端读写时，`/files/url` 直接返回记录里的原始存储地址（客户端直连原存储）。
+
+#### nginx 分流
+
+wf-pan 只占几个前缀，其余路径都属于 ONLYOFFICE（尤其是编辑器加载缓存用的**绝对路径** `/cache/files/...`）。
+
+```nginx
+# 1) wf-pan 自己的路径
+location /api/ { proxy_pass http://127.0.0.1:8081; }
+location /doc/ { proxy_pass http://127.0.0.1:8081; }   # 文档 H5 页面
+location /dl/  { proxy_pass http://127.0.0.1:8081; }   # 签名下载
+# ONLYOFFICE 回连用的接口，绝不能对外
+location /internal/ { return 404; }
+
+# 2) 编辑器静态资源带 /docs/ 前缀（剥离后转发给 ONLYOFFICE）
+location /docs/ {
+    proxy_pass http://wf-docs/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+
+# 3) 其余绝对路径也属于 ONLYOFFICE
+location / {
+    proxy_pass http://wf-docs;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+
+> **重要**：ONLYOFFICE 加载转换结果用的是绝对路径 `/cache/files/...`（**不带 `/docs/` 前缀**），
+> 所以 `location /` 必须给 ONLYOFFICE，wf-pan 的路径要单独列出来。否则编辑器会卡在 `/cache/files/...` 404，报「下载失败」。
+> 两者路径命名易混：wf-pan 是 `/doc/`（单数），ONLYOFFICE 是 `/docs/`（复数）。
+
+#### 注意事项
+
+1. **双向可达**：浏览器要能访问 `/docs/`；ONLYOFFICE 容器要能访问 wf-pan 的 `/internal/docs/**`
+   （用容器网络名，如 `http://wf-pan:8081`，不要用 `127.0.0.1`）。
+2. **JWT 必须一致**：ONLYOFFICE 侧 `JWT_ENABLED=true` 且 `JWT_SECRET` 与 `docs.jwt_secret` 相同，否则取文件/回调全部 403。
+3. **资源要求**：ONLYOFFICE 建议 ≥2 核 / ≥4GB，数据卷要持久化（字体、缓存）。
+4. **手机端**：社区版手机网页端不能编辑，`docs.mobile_edit=false`（默认）时移动端只读。
+5. **路径前缀**：若网盘按 `pan.public_path=/pan` 反代部署，`docs.server_public_path` 与 nginx 的 `/docs/` 需与之一致。
+6. **允许内网地址**：ONLYOFFICE 必须开 `ALLOW_PRIVATE_IP_ADDRESS=true`（必要时 `ALLOW_META_IP_ADDRESS=true`）。否则它拒绝从内网取 `document.url`，表现就是打开文档报「下载失败」——服务端日志里看不到 `/internal/docs/file/...` 请求。
+
+#### 按链接只读打开
+
+- 接口：`POST /api/v1/docs/view-url`，body `{url, name?, platform?}`
+- 页面：`/doc/open?url=<地址>&name=<文件名>`（没有 `fileId`）
+- 地址必须位于网盘 bucket 或 `media.trusted_url_prefixes` 之下，否则拒绝（与「直接引用存储地址」同一校验，防 SSRF）
+- 只读：不注册保存回调、不回写；页面不提供历史版本/分享/转换/下载入口，文件内容由本服务代理给 ONLYOFFICE
+
 ## API 端口
 
 | 端口 | 用途 | 认证方式 | 访问地址 |

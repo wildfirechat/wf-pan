@@ -7,22 +7,84 @@
   var API_BASE = new URL('../api/v1/', DOC_BASE);
 
   // ------------------------------------------------------------ 客户端桥
-  // 与客户端工作台 webview 的 dsbridge 协议一致：prompt("_dsbridge=方法", JSON{data, _dscbstub})，
-  // 异步方法完成时客户端调用 window[_dscbstub](结果)
+  // 两套承载方式：
+  // 1) 原生客户端（Android/iOS/Flutter/鸿蒙）的 WebView：dsbridge 协议
+  //    prompt("_dsbridge=方法", JSON{data, _dscbstub})，异步方法完成时客户端调 window[_dscbstub](结果)；
+  // 2) 浏览器 / uni-app 等用 iframe / web-view 承载本页的宿主：postMessage 协议
+  //    页面 -> 宿主：window.parent.postMessage({__panBridge:true, type:'call'|'listen', id, method, data}, '*')
+  //    宿主 -> 页面：postMessage({__panBridge:true, type:'reply', id, code, data}) 或 {type:'notify', method, data}
+  //    认证码不经 postMessage 传递：宿主直接放进 URL fragment（#panAuthCode=...，不进服务端日志），
+  //    页面读完立即从地址栏抹掉 —— 避免任意父页面拿 iframe 骗到 authCode。
+  var hasDs = !!(window._dsbridge || window._dswk || /WF-DSBridge|_dsbridge/.test(navigator.userAgent));
+  // 网页宿主：iframe 的父页面，或 window.open 打开的弹窗的 opener；两者都用 postMessage 与页面通信。
+  // 弹窗是顶层文档，pan 的 PAN_WS Cookie 是第一方，不受浏览器第三方 Cookie 限制，网页端优先用弹窗。
+  var webHost = (window.parent !== window) ? window.parent : (window.opener || null);
+  var isEmbedded = !!webHost;
+  var hostAuthCode = (function () {
+    var m = /(?:^|[#&])panAuthCode=([^&]+)/.exec(location.hash || '');
+    if (!m) return null;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { }
+    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+  })();
+  // 网页宿主能处理的桥方法；setPageHeader 不在内：网页里页面自己画标题栏。
+  var WEB_CAPS = ['getAuthCode', 'downloadFile', 'openUrl', 'chooseContacts', 'chooseGroup', 'toast', 'close'];
+  var webSeq = 0;
+  var webPending = {};
+  var webListeners = {};
+  if (isEmbedded && !hasDs) {
+    window.addEventListener('message', function (e) {
+      if (e.source !== webHost) return;
+      var m = e.data;
+      if (!m || m.__panBridge !== true) return;
+      if (m.type === 'reply') {
+        var cb = webPending[m.id];
+        if (cb) { delete webPending[m.id]; cb(m); }
+      } else if (m.type === 'notify' && webListeners[m.method]) {
+        webListeners[m.method](m.data);
+      }
+    });
+  }
+  function webPost(msg) {
+    if (webHost) webHost.postMessage(Object.assign({ __panBridge: true }, msg), '*');
+  }
+
   var cbSeq = 0;
+  /** 页面能否向宿主发消息（原生 dsbridge，或 iframe/弹窗宿主） */
+  function canCallHost() {
+    return hasDs || isEmbedded;
+  }
   var Bridge = {
     available: function () {
-      // 野火客户端的 WebView 在 UA 上追加 WF-DSBridge（chat/lib/workspace/webview_support.dart）
-      return !!(window._dsbridge || window._dswk || /WF-DSBridge|_dsbridge/.test(navigator.userAgent));
+      // 野火客户端的 WebView 在 UA 上追加 WF-DSBridge（chat/lib/workspace/webview_support.dart）。
+      // 有 #panAuthCode= 时，即使宿主不实现桥（例如 uni 的顶层 web-view），也能登录并只读渲染。
+      return canCallHost() || !!hostAuthCode;
     },
     callSync: function (method, args) {
-      var arg = JSON.stringify({ data: args === undefined ? null : args });
-      var ret = window._dsbridge ? window._dsbridge.call(method, arg) : prompt('_dsbridge=' + method, arg);
-      try { return JSON.parse(ret || '{}'); } catch (e) { return {}; }
+      if (hasDs) {
+        var arg = JSON.stringify({ data: args === undefined ? null : args });
+        var ret = window._dsbridge ? window._dsbridge.call(method, arg) : prompt('_dsbridge=' + method, arg);
+        try { return JSON.parse(ret || '{}'); } catch (e) { return {}; }
+      }
+      // 网页宿主的 postMessage 是异步的，这里只发不等（openUrl / downloadFile 本来就是单向的）
+      webPost({ type: 'call', id: ++webSeq, method: method, data: args === undefined ? null : args });
+      return {};
     },
     call: function (method, args, timeoutMs) {
+      if (method === 'getAuthCode' && hostAuthCode) {
+        return Promise.resolve({ code: 0, data: hostAuthCode });
+      }
       return new Promise(function (resolve, reject) {
         if (!Bridge.available()) { reject(new Error('不在客户端内')); return; }
+        if (!hasDs) {
+          var id = ++webSeq;
+          var wtimer = timeoutMs ? setTimeout(function () { delete webPending[id]; reject(new Error('客户端无响应')); }, timeoutMs) : null;
+          webPending[id] = function (m) {
+            if (wtimer) clearTimeout(wtimer);
+            resolve(m);
+          };
+          webPost({ type: 'call', id: id, method: method, data: args === undefined ? null : args });
+          return;
+        }
         var name = '__pandscb' + (++cbSeq);
         var timer = timeoutMs ? setTimeout(function () { delete window[name]; reject(new Error('客户端无响应')); }, timeoutMs) : null;
         window[name] = function (res) {
@@ -46,19 +108,28 @@
     },
     /** 调一个会多次回调的异步方法：客户端用 setProgressData 回结果，回调常驻（再调同一方法就换成新的回调） */
     listen: function (method, args, onData) {
+      if (!hasDs) {
+        webListeners[method] = onData;
+        webPost({ type: 'listen', method: method, data: args === undefined ? null : args });
+        return;
+      }
       var name = '__pandsl_' + method.replace(/\W/g, '_');
       window[name] = onData;
       var arg = JSON.stringify({ data: args === undefined ? null : args, _dscbstub: name });
       if (window._dsbridge) window._dsbridge.call(method, arg); else prompt('_dsbridge=' + method, arg);
     },
     has: function (method) {
-      if (!Bridge.available()) return false;
+      if (method === 'getAuthCode') return canCallHost() || !!hostAuthCode;
+      if (!canCallHost()) return false;
+      if (!hasDs) return WEB_CAPS.indexOf(method) >= 0;
       var r = Bridge.callSync('_dsb.hasNativeMethod', { name: method, type: 'all' });
       return r && r.data === true;
     }
   };
-  // 客户端里有自己的标题栏和返回键，页面上重复的标题、「返回」据此藏掉（本脚本在 <head> 里加载，不闪）
-  document.documentElement.classList.toggle('in-client', Bridge.available());
+  // 原生客户端里有自己的标题栏和返回键，页面上重复的标题、「返回」据此藏掉（本脚本在 <head> 里加载，不闪）。
+  // 网页宿主（iframe）里没有 setPageHeader，页面自己画标题栏，所以不加 in-client。
+  document.documentElement.classList.toggle('in-client', hasDs);
+
 
   var headerSupported = null;
   /**
@@ -176,7 +247,7 @@
   /** 打开一个文档：在客户端里交给客户端开新页签/新页面（每个页面各绑各的桥），否则本页跳转 */
   function openDoc(fileId) {
     var url = new URL('open?fileId=' + encodeURIComponent(fileId), DOC_BASE).href;
-    if (Bridge.available()) {
+    if (canCallHost()) {
       Bridge.callSync('openUrl', url);
     } else {
       location.href = url;
@@ -185,7 +256,7 @@
 
   /** 打开下载地址：在客户端里交给客户端，否则新窗口 */
   function openLink(url) {
-    if (Bridge.available()) Bridge.callSync('openUrl', url);
+    if (canCallHost()) Bridge.callSync('openUrl', url);
     else window.open(url, '_blank', 'noopener');
   }
 

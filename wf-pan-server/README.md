@@ -12,6 +12,7 @@
 - ✅ 用户空间自动初始化
 - ✅ 基于 authCode 的 IM 认证
 - ✅ 内嵌管理后台（Vue3）
+- ✅ 在线文档（ONLYOFFICE）：在线编辑、历史版本、按链接只读打开
 
 ## 技术栈
 
@@ -109,6 +110,20 @@ java -jar target/wf-pan-server-1.0.0.jar
 | GET | /api/v1/files/{id}/url | 获取下载URL |
 
 所有客户端请求需要在 Header 中携带 `authCode`。
+
+### 在线文档（ONLYOFFICE，`docs.enabled=true` 时可用）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/v1/docs/create | 用空白模板新建 docx/xlsx/pptx |
+| POST | /api/v1/docs/editor-config | 打开编辑器（返回签名的编辑器配置） |
+| POST | /api/v1/docs/view-url | 按链接**只读**打开（`{url, name?, platform?}`，地址须在受信任前缀下） |
+| POST | /api/v1/docs/convert | 旧格式转为 OOXML 另存 |
+| POST | /api/v1/docs/recent | 最近打开 |
+| POST | /api/v1/docs/recent/remove | 移除最近打开 |
+| GET | /doc/open | 在线文档 H5 页面（`?fileId=` 网盘文件，或 `?url=&name=` 按链接只读） |
+
+`/internal/docs/**` 只给 ONLYOFFICE 在容器网络内调用（JWT + 地址签名），不要经反向代理暴露。
 
 ## 数据库表结构
 
