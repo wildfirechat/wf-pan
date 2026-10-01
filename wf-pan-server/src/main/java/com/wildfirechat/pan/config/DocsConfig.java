@@ -66,4 +66,15 @@ public class DocsConfig {
     /** 本服务自己签名用的密钥（下载链接、网页会话）；未配置时启动时随机生成（重启后旧链接失效） */
     @Value("${pan.sign_secret:}")
     private String signSecret;
+
+    /**
+     * 只读 PDF 预览缓存目录（手机端打开文档先转 PDF 再显示，比加载十几 MB 的编辑器省流量）。
+     * 留空用系统临时目录（重启后失效，下次打开重新转）。
+     */
+    @Value("${docs.preview_dir:}")
+    private String previewDir;
+
+    /** 手机端打开文档时优先用 PDF 预览（只读显示）；关闭则仍走 ONLYOFFICE 编辑器 */
+    @Value("${docs.mobile_pdf_preview:true}")
+    private boolean mobilePdfPreview;
 }

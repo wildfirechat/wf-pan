@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>文档预览</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js"></script>
+<style>
+  html, body { height: 100%; }
+  .preview-page { display: flex; flex-direction: column; height: 100%; background: #525659; }
+  .preview-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: #fff; border-bottom: 1px solid rgba(0,0,0,.08);
+    flex-shrink: 0;
+  }
+  .preview-bar .grow { flex: 1; min-width: 0; }
+  .preview-bar .title {
+    display: block; font-size: 14px; color: #333;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .preview-bar .tag { font-size: 12px; color: #999; }
+  .preview-bar button {
+    border: 1px solid rgba(0,0,0,.15); background: #fff; color: #333; border-radius: 6px;
+    height: 30px; padding: 0 12px; font-size: 13px;
+  }
+  .preview-frame { flex: 1; width: 100%; border: 0; display: block; background: #525659; }
+  .preview-status { flex: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 14px; text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<div class="preview-page">
+  <div class="bar preview-bar" id="bar" hidden>
+    <div class="grow">
+      <span class="title" id="title"></span>
+      <span class="tag" id="tag">只读预览</span>
+    </div>
+    <button id="openExternal" hidden>用其他应用打开</button>
+  </div>
+  <div class="preview-status" id="status">正在生成预览…</div>
+  <iframe class="preview-frame" id="frame" hidden></iframe>
+</div>
+<script>
+/**
+ * 只读 PDF 预览页：手机端打开文档先走这里。
+ * 编辑器（ONLYOFFICE）打开一次要下十几 MB 的静态资源，转成 PDF 之后通常只有几百 KB。
+ * 地址：/doc/preview?fileId=123
+ */
+(function () {
+  'use strict';
+  var D = window.PanDoc;
+  var params = new URLSearchParams(location.search);
+  var fileId = Number(params.get('fileId'));
+  var $ = function (id) { return document.getElementById(id); };
+
+  function fallbackToEditor(reason) {
+    // 转不了就退回编辑器，体验和以前一致
+    var url = 'open?fileId=' + fileId + '&nopreview=1';
+    if (params.get('platform')) url += '&platform=' + encodeURIComponent(params.get('platform'));
+    if (params.get('name')) url += '&name=' + encodeURIComponent(params.get('name'));
+    console.warn('pan doc preview fallback:', reason);
+    location.replace(url);
+  }
+
+  function show(title, url) {
+    document.title = title;
+    $('title').textContent = title;
+    $('bar').hidden = false;
+    $('status').hidden = true;
+    var frame = $('frame');
+    frame.src = url;
+    frame.hidden = false;
+    // 有些 WebView（比如安卓的）不能内嵌显示 PDF，给个按钮交给系统应用
+    var btn = $('openExternal');
+    btn.hidden = false;
+    btn.addEventListener('click', function () { D.downloadFile(url); });
+  }
+
+  if (!fileId) {
+    $('status').textContent = '缺少文件参数';
+    return;
+  }
+  D.api('docs/preview-pdf', { fileId: fileId }).then(function (res) {
+    if (!res || !res.url) {
+      fallbackToEditor('no url');
+      return;
+    }
+    show(res.name || '文档预览', res.url);
+  }).catch(function (e) {
+    fallbackToEditor(e && e.message);
+  });
+})();
+</script>
+</body>
+</html>

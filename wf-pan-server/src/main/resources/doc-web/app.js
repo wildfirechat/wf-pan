@@ -291,8 +291,21 @@
     else openLink(url);
   }
 
+  // ------------------------------------------------------------ 开关
+  var optionsPromise = null;
+  /** 服务端开关：手机上能不能编辑、手机端是不是优先用 PDF 预览（缓存一次） */
+  function options() {
+    if (!optionsPromise) {
+      optionsPromise = api('docs/options').catch(function () {
+        return { mobileEdit: false, mobilePdfPreview: false };
+      });
+    }
+    return optionsPromise;
+  }
+
   window.PanDoc = {
-    Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, esc: esc, ext: ext, kind: kind, icon: icon,
+    Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, options: options,
+    esc: esc, ext: ext, kind: kind, icon: icon,
     fmtTime: fmtTime, fmtSize: fmtSize, PERM: PERM, toast: toast, isMobile: isMobile,
     openDoc: openDoc, openLink: openLink, downloadFile: downloadFile, DOC_BASE: DOC_BASE
   };

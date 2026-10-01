@@ -82,11 +82,27 @@ public class ClientDocsController {
     }
     
     /**
+     * 只读 PDF 预览（手机端省流量）：把文档转成 PDF 再显示，返回带签名的 PDF 地址。
+     * 手机端打开文档默认走这里，转不了再退回编辑器。
+     */
+    @PostMapping("/preview-pdf")
+    public Result<Map<String, Object>> previewPdf(@Valid @RequestBody FileIdRequest request,
+                                                  HttpServletRequest httpRequest) {
+        String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
+        if (userId == null || userId.isEmpty()) {
+            return Result.error(401, "用户未登录");
+        }
+        return Result.success(docsService.previewPdf(request.getFileId(), userId, httpRequest));
+    }
+
+    /**
      * 文档页用的开关：手机上能不能编辑（决定首页是否给手机提供新建）
      */
     @PostMapping("/options")
     public Result<Map<String, Object>> options() {
-        return Result.success(Map.of("mobileEdit", docsConfig.isMobileEdit()));
+        return Result.success(Map.of(
+            "mobileEdit", docsConfig.isMobileEdit(),
+            "mobilePdfPreview", docsConfig.isMobilePdfPreview()));
     }
 
     /**

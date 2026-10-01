@@ -306,7 +306,22 @@
     if (b) onAction(b.dataset.act);
   });
 
-  open();
+  // 手机端只读：先走 PDF 预览（编辑器要下十几 MB，PDF 只要几百 KB）。
+  // 转不出来、或者服务端开了手机端编辑，就照常打开编辑器。
+  var mobileReadOnlyPreview = params.get('platform') === 'mobile' && fileId && params.get('nopreview') !== '1';
+  if (mobileReadOnlyPreview) {
+    D.options().then(function (opt) {
+      if (opt && opt.mobilePdfPreview && !opt.mobileEdit) {
+        var u = 'preview?fileId=' + fileId + '&platform=mobile';
+        if (viewName) u += '&name=' + encodeURIComponent(viewName);
+        location.replace(u);
+        return;
+      }
+      open();
+    }).catch(function () { open(); });
+  } else {
+    open();
+  }
 })();
 </script>
 </body>

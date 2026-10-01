@@ -30,6 +30,8 @@ import com.wildfirechat.pan.service.StorageService;
 import com.wildfirechat.pan.service.StorageService.StoredObject;
 import com.wildfirechat.pan.service.UserSpaceInitService;
 import com.wildfirechat.pan.util.Hs256Jwt;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -37,7 +39,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -127,6 +131,9 @@ public class DocsService {
 
     @Autowired
     private OperationLogService operationLogService;
+
+    @Autowired
+    private com.wildfirechat.pan.service.DownloadService downloadService;
 
     @Autowired
     private PanFileRepository fileRepository;
@@ -577,6 +584,130 @@ public class DocsService {
             throw e;
         } catch (Exception e) {
             throw new BusinessException("转换失败: " + e.getMessage(), e);
+        } finally {
+            deleteQuietly(tmp);
+        }
+    }
+
+    // ------------------------------------------------------------------ 只读 PDF 预览（手机端省流量）
+
+    /**
+     * 手机端只读打开：先把文档转成 PDF 再显示。
+     * 打开一次 ONLYOFFICE 编辑器要下十几 MB 静态资源（sdkjs + 中文字体），转成 PDF 后手机端只要几百 KB。
+     * 转换结果按「文件 + 版本」缓存在本地目录，同一版本只转一次；链接带签名，由 /doc/preview.pdf 输出。
+     */
+    public Map<String, Object> previewPdf(Long fileId, String userId, HttpServletRequest request) {
+        requireEnabled();
+        requireStorage();
+        PanFile file = fileService.requireFile(fileId, userId, FilePermission.VIEW);
+        String ext = ext(file.getName());
+        int versionNo = FileVersionService.currentVersionNo(file);
+        String panPath = docsConfig.getPanPublicPath() == null ? "" : docsConfig.getPanPublicPath();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("fileId", fileId);
+        result.put("versionNo", versionNo);
+        result.put("name", file.getName());
+        if (PDF.contains(ext)) {
+            // 本来就是 PDF：直接给签名下载地址，不用转换
+            result.put("url", downloadService.downloadUrl(file, versionNo, userId, request));
+            result.put("converted", false);
+            return result;
+        }
+        if (documentType(ext) == null) {
+            throw new BusinessException("该格式不支持预览");
+        }
+        Path pdf = previewPdfPath(fileId, versionNo);
+        boolean cached = Files.exists(pdf) && fileSize(pdf) > 0;
+        if (!cached) {
+            try {
+                convertToPdf(file, versionNo, pdf);
+            } catch (BusinessException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new BusinessException("生成预览失败: " + e.getMessage(), e);
+            }
+        }
+        long expire = System.currentTimeMillis() / 1000 + docsConfig.getDownloadTtlSeconds();
+        String sig = signService.signEditorFile(fileId, versionNo, expire);
+        result.put("url", panPath + "/doc/preview.pdf?f=" + fileId + "&v=" + versionNo
+            + "&e=" + expire + "&s=" + sig);
+        result.put("expire", expire);
+        result.put("cached", cached);
+        return result;
+    }
+
+    /** 把缓存的预览 PDF 输出给浏览器（链接带签名，见 previewPdf） */
+    public void servePreviewPdf(Long fileId, int versionNo, long expire, String sign, HttpServletResponse response)
+        throws IOException {
+        requireEnabled();
+        if (expire < System.currentTimeMillis() / 1000) {
+            throw new BusinessException("预览链接已过期");
+        }
+        if (!signService.verifyEditorFile(fileId, versionNo, expire, sign)) {
+            throw new BusinessException("无效的预览链接");
+        }
+        Path pdf = previewPdfPath(fileId, versionNo);
+        if (!Files.exists(pdf) || fileSize(pdf) == 0) {
+            throw new BusinessException("预览不存在，请重新打开");
+        }
+        response.setContentType("application/pdf");
+        response.setHeader("Content-Disposition", "inline; filename=\"preview.pdf\"");
+        response.setHeader("Cache-Control", "private, max-age=" + Math.max(60, docsConfig.getDownloadTtlSeconds()));
+        response.setContentLengthLong(Files.size(pdf));
+        try (OutputStream os = response.getOutputStream()) {
+            Files.copy(pdf, os);
+        }
+    }
+
+    private Path previewPdfPath(Long fileId, int versionNo) {
+        String dir = docsConfig.getPreviewDir();
+        if (dir == null || dir.isBlank()) {
+            dir = System.getProperty("java.io.tmpdir") + java.io.File.separator + "wf-pan-preview";
+        }
+        return Path.of(dir, "f" + fileId + "-v" + versionNo + ".pdf");
+    }
+
+    private static long fileSize(Path p) {
+        try {
+            return Files.size(p);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** 用 ONLYOFFICE 的转换接口把文件转成 PDF，落到 target */
+    private void convertToPdf(PanFile file, int versionNo, Path target) throws Exception {
+        String ext = ext(file.getName());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("async", false);
+        body.put("filetype", ext);
+        body.put("outputtype", "pdf");
+        body.put("key", "p" + fileVersionService.ensureDocKey(file) + "-" + versionNo + "-pdf");
+        body.put("title", file.getName());
+        body.put("url", internalFileUrl(file.getId(), versionNo));
+        body.put("token", Hs256Jwt.sign(body, docsConfig.getJwtSecret()));
+
+        Path tmp = null;
+        try {
+            HttpRequest req = HttpRequest.newBuilder(URI.create(docsConfig.getServerInternalUrl() + "/converter"))
+                .timeout(Duration.ofMinutes(3))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body)))
+                .build();
+            HttpResponse<byte[]> resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> res = mapper.readValue(resp.body(), Map.class);
+            if (!Boolean.TRUE.equals(res.get("endConvert")) || res.get("fileUrl") == null) {
+                log.error("生成 PDF 预览失败 file={} http={} result={}", file.getId(), resp.statusCode(), res);
+                throw new BusinessException("生成预览失败"
+                    + (res.get("error") != null ? "（错误码 " + res.get("error") + "）" : ""));
+            }
+            tmp = download(toInternal((String) res.get("fileUrl")));
+            Files.createDirectories(target.getParent());
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            tmp = null;
         } finally {
             deleteQuietly(tmp);
         }

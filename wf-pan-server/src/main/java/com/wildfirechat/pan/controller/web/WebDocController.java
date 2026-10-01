@@ -5,6 +5,7 @@ import com.wildfirechat.pan.dto.Result;
 import com.wildfirechat.pan.dto.request.WebSessionRequest;
 import com.wildfirechat.pan.filter.ClientAuthFilter;
 import com.wildfirechat.pan.service.IMUserService;
+import com.wildfirechat.pan.service.docs.DocsService;
 import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.auth.ClientAuthService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseBody;
 
@@ -40,6 +42,9 @@ public class WebDocController {
     @Autowired
     private DocsConfig docsConfig;
 
+    @Autowired
+    private DocsService docsService;
+
     @GetMapping("/doc")
     public void root(HttpServletResponse response) {
         // 相对地址：对外是 /pan/doc → /pan/doc/
@@ -55,6 +60,22 @@ public class WebDocController {
     @GetMapping("/doc/open")
     public String open() {
         return "forward:/doc/open.html";
+    }
+
+    /** 只读 PDF 预览页：手机端打开文档走这里，省掉十几 MB 的编辑器静态资源 */
+    @GetMapping("/doc/preview")
+    public String preview() {
+        return "forward:/doc/preview.html";
+    }
+
+    /** 输出缓存的预览 PDF；链接由 /api/v1/docs/preview-pdf 签发，自带签名与有效期 */
+    @GetMapping("/doc/preview.pdf")
+    public void previewPdf(@RequestParam("f") Long fileId,
+                           @RequestParam("v") int versionNo,
+                           @RequestParam("e") long expire,
+                           @RequestParam("s") String sign,
+                           HttpServletResponse response) throws Exception {
+        docsService.servePreviewPdf(fileId, versionNo, expire, sign, response);
     }
 
     @PostMapping("/doc/session")
