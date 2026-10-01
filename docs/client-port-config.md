@@ -21,7 +21,7 @@
 
 | 客户端 | 配置 | 门控函数 | 入口（PC / 移动） |
 |---|---|---|---|
-| vue-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | Web：左侧图标导航栏「网盘」「在线文档」（不在设置里） |
+| vue-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | Web：左侧图标导航栏「网盘」「在线文档」（不在设置里）；两个页都是三栏（图标导航栏 + 列表栏 + 详情栏） |
 | vue-pc-chat | `Config.PAN_SERVER` / `PAN_BACKUP_SERVER` | `Config.isPanEnabled()` | PC：左侧栏「网盘」「在线文档」；文档在**独立窗口**打开（一文档一窗口） |
 | android-chat | `Config.PAN_SERVER_ADDRESS` / `_BACKUP_ADDRESS` | `Config.isPanConfigured()` | 移动：“我”页 OptionItemView |
 | ios-chat | 已有 `PAN_SERVER_ADDRESS`（沿用） | `PanService.isPanConfigured`（新增/沿用） | 移动：发现页 + 资料页 |
@@ -34,7 +34,7 @@
   上传（IM SDK 上传媒体 → `POST /files` 登记）、下载（`POST /files/url` 取签名地址）、
   重命名、移动、复制、删除、分享（选人/选群）、历史版本。
 - 在线文档：文档首页（最近打开、新建 docx/xlsx/pptx、开源许可）、打开编辑器/只读打开；
-  移动端按 `docs.mobile_edit`（默认 false，只读）。
+  移动端按 `docs.mobile_edit`（默认 false，只读）；Web 端文档列表在中间栏、文档在详情栏内打开。
   > **手机端编辑需要 ONLYOFFICE 商业版**：移动端网页端（H5）的编辑能力属于 ONLYOFFICE 商业版/商业许可功能，
   > 社区版在手机网页端只能查看，点编辑会弹许可提示。因此默认 `docs.mobile_edit=false`：PC 端可编辑、移动端只读；
   > 客户购买商业许可后把该配置改为 `true` 并重启即可放开。
