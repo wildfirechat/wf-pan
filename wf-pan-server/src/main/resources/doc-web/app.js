@@ -163,11 +163,33 @@
     return loginPromise;
   }
 
+  /**
+   * 打开页面时先用宿主给的 authCode 刷一次会话。
+   *
+   * 客户端（尤其是 Electron/浏览器）里会残留上一个账号的 PAN_WS 会话 Cookie，
+   * 服务端按旧账号鉴权，就会报「无权限访问该文件」——只有 1001/1002/1004 才会触发重新登录，
+   * 业务层权限错误不会。所以这里主动登录一次，把会话绑到当前客户端用户。
+   * 刷新失败（比如 authCode 过期）就沿用现有会话，走原来的兜底逻辑。
+   */
+  var sessionReady = null;
+  function ensureSession() {
+    if (!sessionReady) {
+      sessionReady = (Bridge.available() ? login() : Promise.resolve(null))
+        .catch(function (e) {
+          console.warn('pan doc: 刷新会话失败，沿用现有会话', e && e.message);
+          return null;
+        });
+    }
+    return sessionReady;
+  }
+
   function api(path, body, retried) {
-    return fetch(new URL(path, API_BASE), {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-Pan-Web': '1' },
-      body: JSON.stringify(body || {})
+    return ensureSession().then(function () {
+      return fetch(new URL(path, API_BASE), {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Pan-Web': '1' },
+        body: JSON.stringify(body || {})
+      });
     }).then(function (r) {
       return r.json().catch(function () { throw new Error('服务异常（HTTP ' + r.status + '）'); });
     }).then(function (r) {
