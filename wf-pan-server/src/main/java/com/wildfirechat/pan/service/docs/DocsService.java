@@ -674,30 +674,48 @@ public class DocsService {
         return result;
     }
 
-    /** 输出缓存的预览 PDF（链接由 previewPdf 签发，带签名与有效期） */
+    /**
+     * 输出缓存的预览 PDF（链接由 previewPdf 签发，带签名与有效期）。
+     * 这里是浏览器直接取的地址，校验失败要回明确的 HTTP 状态码，页面才能据此退回编辑器。
+     */
     public void servePreviewPdf(Long fileId, Integer versionNo, String encodedUrl, long expire, String sign,
                                 HttpServletResponse response) throws IOException {
-        requireEnabled();
+        if (!docsConfig.isEnabled()) {
+            writePreviewError(response, 404, "在线文档未启用");
+            return;
+        }
         if (expire < System.currentTimeMillis() / 1000) {
-            throw new BusinessException("预览链接已过期");
+            writePreviewError(response, 410, "预览链接已过期");
+            return;
         }
         String stem;
-        if (fileId != null && fileId > 0) {
-            int version = versionNo == null ? 0 : versionNo;
-            if (!signService.verifyEditorFile(fileId, version, expire, sign)) {
-                throw new BusinessException("无效的预览链接");
+        try {
+            if (fileId != null && fileId > 0) {
+                int version = versionNo == null ? 0 : versionNo;
+                if (!signService.verifyEditorFile(fileId, version, expire, sign)) {
+                    writePreviewError(response, 403, "无效的预览链接");
+                    return;
+                }
+                stem = "f" + fileId + "-v" + version;
+            } else if (encodedUrl != null && !encodedUrl.isEmpty()) {
+                String viewUrl = new String(Base64.getUrlDecoder().decode(encodedUrl), StandardCharsets.UTF_8);
+                if (!signService.verifyEditorUrl(viewUrl, expire, sign)) {
+                    writePreviewError(response, 403, "无效的预览链接");
+                    return;
+                }
+                stem = urlDocKey(viewUrl);
+            } else {
+                writePreviewError(response, 400, "缺少预览参数");
+                return;
             }
-            stem = "f" + fileId + "-v" + version;
-        } else {
-            String viewUrl = new String(Base64.getUrlDecoder().decode(encodedUrl), StandardCharsets.UTF_8);
-            if (!signService.verifyEditorUrl(viewUrl, expire, sign)) {
-                throw new BusinessException("无效的预览链接");
-            }
-            stem = urlDocKey(viewUrl);
+        } catch (IllegalArgumentException e) {
+            writePreviewError(response, 400, "预览参数无效");
+            return;
         }
         Path pdf = previewCachePath(stem);
         if (!Files.exists(pdf) || fileSize(pdf) == 0) {
-            throw new BusinessException("预览不存在，请重新打开");
+            writePreviewError(response, 404, "预览不存在，请重新打开");
+            return;
         }
         response.setContentType("application/pdf");
         response.setHeader("Content-Disposition", "inline; filename=\"preview.pdf\"");
@@ -706,6 +724,12 @@ public class DocsService {
         try (OutputStream os = response.getOutputStream()) {
             Files.copy(pdf, os);
         }
+    }
+
+    private void writePreviewError(HttpServletResponse response, int status, String message) throws IOException {
+        response.setStatus(status);
+        response.setContentType("text/plain;charset=UTF-8");
+        response.getWriter().write(message);
     }
 
     private Path previewCachePath(String stem) {

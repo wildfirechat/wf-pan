@@ -89,7 +89,16 @@
       fallbackToEditor('no url');
       return;
     }
-    show(res.name || '文档预览', res.url);
+    // 先探一下 PDF 地址（过期/被清缓存时返回的是错误码），不行就退回编辑器，避免页面里出现一段报错文本
+    return fetch(res.url, {method: 'HEAD', credentials: 'same-origin'}).then(function (r) {
+      if (!r.ok) {
+        fallbackToEditor('pdf http ' + r.status);
+        return;
+      }
+      show(res.name || '文档预览', res.url);
+    }).catch(function () {
+      show(res.name || '文档预览', res.url);
+    });
   }).catch(function (e) {
     fallbackToEditor(e && e.message);
   });

@@ -229,19 +229,47 @@ curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worke
 - **鸿蒙**：`WfcWebView` 已开 `domStorageAccess(true)`。
 - **iOS**：WKWebView 默认用持久化 `WKWebsiteDataStore`（只有登出/被踢时才清），无需改动。
 
-### 9.3 还能再降：可选的三条路
+### 9.3 已做：手机端一律走 PDF 预览
 
-1. **字体子集化（省最多，需要人工验收）**：`fonts/217` 等中文字体是最大单项（gzip 9.18MB）。
-   用 fonttools 对**同一款字体**做子集（ASCII + 标点 + GB18030 常用字，保留 `hhea/OS 2/name` 等度量表），
-   再按 ONLYOFFICE 的 32 字节 XOR 规则混淆并生成 `.gz`，可降到 ~2MB。
-   **关键**：必须同步修改 `sdkjs/common/AllFonts.js` 里该字体的码点覆盖区间，
-   否则客户端以为字体仍然覆盖全部字符、缺字时不会回退，就会出现上一次的「缺字/排版异常」。
-2. **客户端本地化编辑器资源（最彻底）**：客户端首次把 `/docs/**` 静态资源打包下载到 App 私有目录
+手机端本来就不给编辑（`docs.mobile_edit=false`），所以**手机上打开文档都先转 PDF**，
+不再加载十几 MB 的编辑器；转不出来再自动退回编辑器（URL 上加 `nopreview=1`）。
+
+- 接口：`POST /api/v1/docs/preview-pdf`
+  - 网盘文件：`{fileId}` → 按「文件 + 版本」缓存；
+  - 按链接只读（聊天文件消息、外部链接）：`{url, name}` → 按地址哈希缓存，地址须在受信任前缀下。
+- 输出：`GET /doc/preview.pdf?f=&v=&e=&s=`（文件）或 `?u=&e=&s=`（链接），签名 + 有效期，
+  过期/无效返回 410/403（页面据此退回编辑器）。
+- 页面：`/doc/preview?fileId=…` 或 `/doc/preview?url=…&name=…`；`/doc/open` 在手机 UA/`platform=mobile`
+  下会直接跳到它。桌面端（PC/Web）不受影响，仍走编辑器。
+
+实测：一篇中文文档预览 PDF 约 **300KB**，空白文档 2.2KB；编辑器路径要下 7~16MB。
+
+相关配置：
+
+```properties
+docs.mobile_pdf_preview=true          # 手机端优先 PDF 预览（关掉则回到编辑器）
+docs.preview_dir=/root/pan/preview    # 预览缓存目录（按文件+版本复用；留空用系统临时目录）
+```
+
+### 9.4 自检脚本
+
+部署完（或改完配置）跑一遍，确认各项优化真的生效：
+
+```bash
+bash /root/pan-deploy/onlyoffice/verify_optimizations.sh
+```
+
+它会检查：Service Worker 补丁、`fonts/217` 子集是否生效（对比 gzip 传输大小）、`AllFonts.js`
+是否同步、`/doc/preview` 与页面对不对、无效预览链接是不是返回错误码、ONLYOFFICE 健康检查。
+
+### 9.5 还能再降
+
+1. **客户端本地化编辑器资源（最彻底）**：客户端首次把 `/docs/**` 静态资源打包下载到 App 私有目录
    （或直接打进安装包），之后由本地 HTTP/自定义 scheme 提供，做到「一次下载、永久使用」，甚至离线。
    代价是每个客户端（iOS/Android/鸿蒙/PC）都要实现一份本地资源服务。
-3. **移动端只读改走 PDF 预览（对"看文档"最省）**：服务端用 ONLYOFFICE 的转换能力把 docx/xlsx/pptx
-   转成 PDF 并缓存，移动端只下载几百 KB 的 PDF 用现成预览器打开（编辑仍走 ONLYOFFICE）。
-   只读场景可从 ~16MB 降到 0.2–1MB。
+2. **裁剪 sdkjs 源码**：从 sdkjs 源码构建精简版（去宏/VBA、表单、图表、插件、拼写、PDF、嵌入字体等），
+   预计 `sdk-all.js` gzip 4.7MB → ~3MB；需要自己维护构建，且改动 ONLYOFFICE（AGPL）对外分发有源码义务。
+3. **CDN**：把 `/docs/` 静态资源接到 CDN 回源加速（本文件第 7 节）。
 
 > 注意：修改 sdkjs / 重新打包编辑器属于修改 ONLYOFFICE（AGPL v3）代码，
 > 对外提供修改版时需按 AGPL 要求提供对应源码与许可声明；商用前请和法务确认。
