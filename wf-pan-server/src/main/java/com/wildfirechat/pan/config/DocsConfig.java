@@ -77,4 +77,11 @@ public class DocsConfig {
     /** 手机端打开文档时优先用 PDF 预览（只读显示）；关闭则仍走 ONLYOFFICE 编辑器 */
     @Value("${docs.mobile_pdf_preview:true}")
     private boolean mobilePdfPreview;
+
+    /**
+     * 预览 PDF 缓存的保留天数：同一个文件按「文件 + 版本」缓存，转一次就一直用，不会重复转换。
+     * 超过这个天数没被打开过的缓存会被清理（<=0 表示不清理，目录会一直增长）。
+     */
+    @Value("${docs.preview_ttl_days:30}")
+    private int previewTtlDays;
 }

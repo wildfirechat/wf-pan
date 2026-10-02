@@ -50,6 +50,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -59,6 +60,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -354,12 +356,64 @@ public class DocsService {
      * 只能用 [0-9a-zA-Z_-]，长度上限 128。
      */
     private String urlDocKey(String url) {
+        return hashKey(url);
+    }
+
+    /**
+     * PDF 预览缓存的 key。对象存储的地址每次访问签名/有效期都不一样，直接哈希整个地址会被当成新文件反复转换，
+     * 所以先去掉签名类参数，只按「协议 + 域名 + 路径 + 业务参数」算 key，同一个文件不管打开多少次都只转一次。
+     */
+    private String urlPreviewKey(String url) {
+        return hashKey(canonicalUrl(url));
+    }
+
+    private String hashKey(String value) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(url.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = md.digest(value.getBytes(StandardCharsets.UTF_8));
             return "u" + HexFormat.of().formatHex(digest);
         } catch (Exception e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    /** S3 / 阿里 OSS / 七牛 / 自签链接里的签名与过期参数，算缓存 key 时忽略 */
+    private static final Set<String> SIGN_PARAMS = Set.of(
+        "x-amz-algorithm", "x-amz-credential", "x-amz-date", "x-amz-expires", "x-amz-signedheaders",
+        "x-amz-signature", "x-amz-security-token", "x-amz-user-agent",
+        "x-oss-signature", "x-oss-credential", "x-oss-date", "x-oss-expires", "x-oss-security-token",
+        "ossaccesskeyid", "awsaccesskeyid", "signature", "security-token", "expires",
+        "q-sign-algorithm", "q-ak", "q-sign-time", "q-key-time", "q-header-list", "q-url-param-list", "q-signature",
+        "token", "sign", "sig", "auth_key", "wssecret", "wstime");
+
+    static String canonicalUrl(String url) {
+        String trimmed = url == null ? "" : url.trim();
+        try {
+            URI uri = URI.create(trimmed);
+            if (uri.getScheme() == null || uri.getAuthority() == null) {
+                return trimmed;
+            }
+            StringBuilder sb = new StringBuilder(uri.getScheme()).append("://").append(uri.getAuthority())
+                .append(uri.getRawPath() == null ? "" : uri.getRawPath());
+            String query = uri.getRawQuery();
+            if (query != null && !query.isEmpty()) {
+                boolean first = true;
+                for (String pair : query.split("&")) {
+                    if (pair.isEmpty()) {
+                        continue;
+                    }
+                    int eq = pair.indexOf('=');
+                    String name = (eq < 0 ? pair : pair.substring(0, eq)).toLowerCase(Locale.ROOT);
+                    if (SIGN_PARAMS.contains(name)) {
+                        continue;
+                    }
+                    sb.append(first ? '?' : '&').append(pair);
+                    first = false;
+                }
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return trimmed;
         }
     }
 
@@ -602,6 +656,7 @@ public class DocsService {
     public Map<String, Object> previewPdf(Long fileId, String viewUrl, String name, String userId,
                                           HttpServletRequest request) {
         requireEnabled();
+        cleanupPreviewCache();
         Map<String, Object> result = new LinkedHashMap<>();
         String panPath = docsConfig.getPanPublicPath() == null ? "" : docsConfig.getPanPublicPath();
         long expire = System.currentTimeMillis() / 1000 + docsConfig.getDownloadTtlSeconds();
@@ -626,7 +681,9 @@ public class DocsService {
             String stem = "f" + fileId + "-v" + versionNo;
             Path pdf = previewCachePath(stem);
             boolean cached = Files.exists(pdf) && fileSize(pdf) > 0;
-            if (!cached) {
+            if (cached) {
+                touchPreview(pdf);
+            } else {
                 try {
                     convertToPdf(ext, file.getName(), internalFileUrl(fileId, versionNo), stem + "-pdf", pdf);
                 } catch (BusinessException e) {
@@ -634,7 +691,11 @@ public class DocsService {
                 } catch (Exception e) {
                     throw new BusinessException("生成预览失败: " + e.getMessage(), e);
                 }
+                // 新版本已经能预览了，旧版本的预览文件删掉，避免目录无限增长
+                prunePreviewVersions("f" + fileId + "-v", pdf);
             }
+            log.info("PDF 预览（网盘文件）{} fileId={} v={} name={}", cached ? "命中缓存" : "已生成",
+                fileId, versionNo, file.getName());
             result.put("url", panPath + "/doc/preview.pdf?f=" + fileId + "&v=" + versionNo
                 + "&e=" + expire + "&s=" + signService.signEditorFile(fileId, versionNo, expire));
             result.put("expire", expire);
@@ -652,10 +713,12 @@ public class DocsService {
         if (documentType(ext) == null) {
             throw new BusinessException("该格式不支持预览");
         }
-        String stem = urlDocKey(viewUrl);
+        String stem = urlPreviewKey(viewUrl);
         Path pdf = previewCachePath(stem);
         boolean cached = Files.exists(pdf) && fileSize(pdf) > 0;
-        if (!cached) {
+        if (cached) {
+            touchPreview(pdf);
+        } else {
             try {
                 convertToPdf(ext, fileName, internalReadUrl(viewUrl), stem + "-pdf", pdf);
             } catch (BusinessException e) {
@@ -664,6 +727,8 @@ public class DocsService {
                 throw new BusinessException("生成预览失败: " + e.getMessage(), e);
             }
         }
+        log.info("PDF 预览（链接）{} url={} name={}", cached ? "命中缓存" : "已生成",
+            canonicalUrl(viewUrl), fileName);
         String encoded = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(viewUrl.getBytes(StandardCharsets.UTF_8));
         result.put("name", fileName);
@@ -703,7 +768,7 @@ public class DocsService {
                     writePreviewError(response, 403, "无效的预览链接");
                     return;
                 }
-                stem = urlDocKey(viewUrl);
+                stem = urlPreviewKey(viewUrl);
             } else {
                 writePreviewError(response, 400, "缺少预览参数");
                 return;
@@ -724,6 +789,7 @@ public class DocsService {
         try (OutputStream os = response.getOutputStream()) {
             Files.copy(pdf, os);
         }
+        touchPreview(pdf);
     }
 
     private void writePreviewError(HttpServletResponse response, int status, String message) throws IOException {
@@ -748,6 +814,82 @@ public class DocsService {
         }
     }
 
+    /** 缓存命中就更新一下访问时间，过期清理按「最后一次被打开」算 */
+    private void touchPreview(Path pdf) {
+        try {
+            Files.setLastModifiedTime(pdf, FileTime.fromMillis(System.currentTimeMillis()));
+        } catch (Exception ignore) {
+            // 更新失败不影响预览
+        }
+    }
+
+    /** 文件出了新版本后，旧版本的预览 PDF 不会再被访问，直接删掉 */
+    private void prunePreviewVersions(String prefix, Path keep) {
+        Path dir = keep.getParent();
+        if (dir == null || !Files.isDirectory(dir)) {
+            return;
+        }
+        try (var stream = Files.list(dir)) {
+            for (Path p : stream.collect(Collectors.toList())) {
+                try {
+                    String n = p.getFileName().toString();
+                    if (n.endsWith(".pdf") && n.startsWith(prefix) && !p.equals(keep)) {
+                        Files.deleteIfExists(p);
+                    }
+                } catch (Exception ignore) {
+                    // 单个文件删不掉不影响其它文件
+                }
+            }
+        } catch (Exception e) {
+            log.debug("清理旧版本预览失败: {}", e.getMessage());
+        }
+    }
+
+    private static final long PREVIEW_CLEAN_INTERVAL_MS = 10 * 60 * 1000L;
+    private volatile long lastPreviewCleanAt = 0L;
+
+    /**
+     * 预览 PDF 会一直堆在 docs.preview_dir 里，超过 docs.preview_ttl_days 天没被打开过的清掉。
+     * 每次生成预览时最多清理一次（10 分钟间隔），避免频繁扫目录。
+     */
+    private void cleanupPreviewCache() {
+        long now = System.currentTimeMillis();
+        if (now - lastPreviewCleanAt < PREVIEW_CLEAN_INTERVAL_MS) {
+            return;
+        }
+        lastPreviewCleanAt = now;
+        Path dir = previewCachePath("x").getParent();
+        if (dir == null || !Files.isDirectory(dir)) {
+            return;
+        }
+        int ttlDays = docsConfig.getPreviewTtlDays();
+        if (ttlDays <= 0) {
+            return;
+        }
+        long ttlMs = ttlDays * 86400_000L;
+        int removed = 0;
+        try (var stream = Files.list(dir)) {
+            for (Path p : stream.collect(Collectors.toList())) {
+                try {
+                    if (!p.getFileName().toString().endsWith(".pdf")) {
+                        continue;
+                    }
+                    if (now - Files.getLastModifiedTime(p).toMillis() > ttlMs) {
+                        Files.deleteIfExists(p);
+                        removed++;
+                    }
+                } catch (Exception ignore) {
+                    // 单个文件删不掉不影响其它文件
+                }
+            }
+        } catch (Exception e) {
+            log.debug("清理预览缓存失败: {}", e.getMessage());
+        }
+        if (removed > 0) {
+            log.info("清理超过 {} 天未使用的 PDF 预览缓存 {} 个", ttlDays, removed);
+        }
+    }
+
     /** 用 ONLYOFFICE 的转换接口把文档转成 PDF，落到 target */
     private void convertToPdf(String ext, String title, String sourceUrl, String key, Path target) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -760,6 +902,7 @@ public class DocsService {
         body.put("token", Hs256Jwt.sign(body, docsConfig.getJwtSecret()));
 
         Path tmp = null;
+        long started = System.currentTimeMillis();
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(docsConfig.getServerInternalUrl() + "/converter"))
                 .timeout(Duration.ofMinutes(3))
@@ -779,6 +922,8 @@ public class DocsService {
             Files.createDirectories(target.getParent());
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             tmp = null;
+            log.info("PDF 转换完成 key={} 耗时={}ms 大小={}KB", key,
+                System.currentTimeMillis() - started, Files.size(target) / 1024);
         } finally {
             deleteQuietly(tmp);
         }
