@@ -303,8 +303,15 @@
     return optionsPromise;
   }
 
+  /** 编辑器文档就绪：客户端（PC 端独立窗口）据此把「正在加载」收掉 */
+  function docReady() {
+    if (hasDs) {
+      try { Bridge.callSync('docReady', {}); } catch (e) { /* 客户端不支持就算了 */ }
+    }
+  }
+
   window.PanDoc = {
-    Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, options: options,
+    Bridge: Bridge, pageHeader: pageHeader, api: api, login: login, options: options, docReady: docReady,
     esc: esc, ext: ext, kind: kind, icon: icon,
     fmtTime: fmtTime, fmtSize: fmtSize, PERM: PERM, toast: toast, isMobile: isMobile,
     openDoc: openDoc, openLink: openLink, downloadFile: downloadFile, DOC_BASE: DOC_BASE

@@ -126,7 +126,7 @@
         var cfg = res.config;
         cfg.events = {
           onAppReady: function () { ev('appReady'); },
-          onDocumentReady: function () { ev('documentReady'); },
+          onDocumentReady: function () { ev('documentReady'); D.docReady(); },
           onDocumentStateChange: function (e) { ev('stateChange', e && e.data); },
           onError: function (e) { ev('error', e && e.data); },
           onWarning: function (e) { ev('warning', e && e.data); },
