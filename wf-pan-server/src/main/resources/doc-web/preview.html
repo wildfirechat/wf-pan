@@ -25,6 +25,15 @@
     height: 30px; padding: 0 12px; font-size: 13px;
   }
   .preview-frame { flex: 1; width: 100%; border: 0; display: block; background: #525659; }
+  /* pdf.js 画出来的连续页面：手机 WebView 内嵌 PDF 只能显示第一页（安卓根本不显示），所以自己画 */
+  .pdf-pages {
+    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+    padding: 8px 0 24px; background: #525659;
+  }
+  .pdf-page {
+    display: block; margin: 0 auto 10px; background: #fff;
+    box-shadow: 0 1px 6px rgba(0,0,0,.45);
+  }
   .preview-status { flex: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 14px; text-align: center; padding: 24px; }
 </style>
 </head>
@@ -39,12 +48,19 @@
   </div>
   <div class="preview-status" id="status">正在生成预览…</div>
   <iframe class="preview-frame" id="frame" hidden></iframe>
+  <div class="pdf-pages" id="pages" hidden></div>
 </div>
 <script>
 /**
  * 只读 PDF 预览页：手机端打开文档先走这里。
- * 编辑器（ONLYOFFICE）打开一次要下十几 MB 的静态资源，转成 PDF 之后通常只有几百 KB。
- * 地址：/doc/preview?fileId=123
+ * 编辑器（ONLYOFFICE）打开一次要下十几 MB 静态资源，转成 PDF 通常只有几百 KB。
+ *
+ * 显示方式分两种：
+ *  - 桌面（PC/Web）：用内置 PDF 查看器（iframe），带缩放/翻页/选中；
+ *  - 手机 WebView：iOS 的 WKWebView 把 PDF 放进 iframe 只画第一页，安卓 WebView 不能内嵌 PDF，
+ *    所以手机端用 pdf.js 把每一页画到 canvas 上，滚动浏览，各端表现一致。
+ *
+ * 地址：/doc/preview?fileId=123 或 /doc/preview?url=…&name=…
  */
 (function () {
   'use strict';
@@ -56,7 +72,7 @@
   var $ = function (id) { return document.getElementById(id); };
 
   function fallbackToEditor(reason) {
-    // 转不了就退回编辑器，体验和以前一致
+    // 转不了（或渲染不出来）就退回编辑器，体验和以前一致
     var url = 'open?nopreview=1';
     if (fileId) url += '&fileId=' + fileId;
     if (viewUrl) url += '&url=' + encodeURIComponent(viewUrl);
@@ -66,40 +82,109 @@
     location.replace(url);
   }
 
-  function show(title, url) {
+  function isMobileClient() {
+    if (params.get('platform') === 'mobile') return true;
+    return /Android|iPhone|iPad|iPod|Mobile|HarmonyOS|OpenHarmony|Windows Phone/i.test(navigator.userAgent);
+  }
+
+  function showBar(title, pdfUrl) {
     document.title = title;
     $('title').textContent = title;
     $('bar').hidden = false;
     $('status').hidden = true;
-    var frame = $('frame');
-    frame.src = url;
-    frame.hidden = false;
-    // 有些 WebView（比如安卓的）不能内嵌显示 PDF，给个按钮交给系统应用
+    // 留一个出口：用户想用系统应用看、或某些 WebView 画不出来时
     var btn = $('openExternal');
     btn.hidden = false;
-    btn.addEventListener('click', function () { D.downloadFile(url); });
+    btn.addEventListener('click', function () { D.downloadFile(pdfUrl); });
+  }
+
+  /** 桌面：交给内置 PDF 查看器 */
+  function showFrame(title, pdfUrl) {
+    showBar(title, pdfUrl);
+    var frame = $('frame');
+    frame.src = pdfUrl;
+    frame.hidden = false;
+  }
+
+  /** 手机：pdf.js 逐页画到 canvas */
+  function showPdfJs(title, pdfUrl) {
+    showBar(title, pdfUrl);
+    $('status').hidden = false;
+    $('status').textContent = '正在渲染…';
+    loadScript(new URL('pdf.min.js', D.DOC_BASE).href).then(function () {
+      var pdfjsLib = window.pdfjsLib;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.js', D.DOC_BASE).href;
+      return pdfjsLib.getDocument({url: pdfUrl, withCredentials: true}).promise;
+    }).then(function (pdf) {
+      var box = $('pages');
+      box.hidden = false;
+      $('status').hidden = true;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var chain = Promise.resolve();
+      var availWidth = function () { return Math.max(200, box.clientWidth - 16); };
+      for (var n = 1; n <= pdf.numPages; n++) {
+        (function (n) {
+          chain = chain.then(function () {
+            return pdf.getPage(n).then(function (page) {
+              var base = page.getViewport({scale: 1});
+              var scale = availWidth() / base.width;
+              var viewport = page.getViewport({scale: scale * dpr});
+              var canvas = document.createElement('canvas');
+              canvas.className = 'pdf-page';
+              canvas.width = Math.floor(viewport.width);
+              canvas.height = Math.floor(viewport.height);
+              canvas.style.width = Math.floor(viewport.width / dpr) + 'px';
+              canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
+              box.appendChild(canvas);
+              return page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise
+                .then(function () { page.cleanup(); });
+            });
+          });
+        })(n);
+      }
+      return chain;
+    })['catch'](function (e) {
+      // pdf.js 出问题就退回编辑器（PC/网页上编辑器是好的）
+      fallbackToEditor('pdf.js: ' + (e && e.message));
+    });
+  }
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('脚本加载失败')); };
+      document.head.appendChild(s);
+    });
   }
 
   if (!fileId && !viewUrl) {
     $('status').textContent = '缺少文件参数';
     return;
   }
+
   D.api('docs/preview-pdf', fileId ? { fileId: fileId } : { url: viewUrl, name: viewName }).then(function (res) {
     if (!res || !res.url) {
       fallbackToEditor('no url');
       return;
     }
-    // 先探一下 PDF 地址（过期/被清缓存时返回的是错误码），不行就退回编辑器，避免页面里出现一段报错文本
+    var title = res.name || '文档预览';
+    if (isMobileClient()) {
+      showPdfJs(title, res.url);
+      return;
+    }
+    // 桌面：先探一下 PDF 地址（过期/被清缓存时返回错误码），不行就退回编辑器
     return fetch(res.url, {method: 'HEAD', credentials: 'same-origin'}).then(function (r) {
       if (!r.ok) {
         fallbackToEditor('pdf http ' + r.status);
         return;
       }
-      show(res.name || '文档预览', res.url);
-    }).catch(function () {
-      show(res.name || '文档预览', res.url);
+      showFrame(title, res.url);
+    })['catch'](function () {
+      showFrame(title, res.url);
     });
-  }).catch(function (e) {
+  })['catch'](function (e) {
     fallbackToEditor(e && e.message);
   });
 })();

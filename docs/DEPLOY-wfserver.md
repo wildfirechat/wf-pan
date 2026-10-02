@@ -244,6 +244,11 @@ curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worke
 
 实测：一篇中文文档预览 PDF 约 **300KB**，空白文档 2.2KB；编辑器路径要下 7~16MB。
 
+> **渲染方式**：桌面（PC/Web）用浏览器内置 PDF 查看器（iframe，带缩放/翻页/选中）；
+> **手机端用 pdf.js 逐页画到 canvas**——iOS 的 WKWebView 把 PDF 放进 iframe **只显示第一页**，
+> 安卓 WebView 则完全不能内嵌 PDF。pdf.js 资源（`pdf.min.js` + `pdf.worker.min.js`，约 1.5MB）
+> 放在 `/doc/` 下随页面一起缓存，只在手机端加载。
+
 > 桌面端（PC）仍然是加载 ONLYOFFICE 编辑器：首屏要把 sdkjs（gzip 4.7MB）和字体引擎在本地解析，
 > 实测**首次打开约 5~15 秒**（第二次因为缓存会快些）。客户端的文档窗口会显示「正在加载…」，
 > 加载失败才提示错误 + 重试；这段等待是编辑器自身的初始化时间，不是网络问题。
