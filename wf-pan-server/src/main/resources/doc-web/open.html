@@ -57,6 +57,41 @@
   var $ = function (id) { return document.getElementById(id); };
 
   /**
+   * 渲染自检：编辑器把文档画在 canvas 上，这里采一块像素看有没有内容。
+   * 结果随 docReady 一并发给客户端（PC 端会写进 pan-doc.log），用来判断"窗口空白"到底是
+   * 加载问题还是渲染问题（画布有内容=渲染正常，空白是窗口/合成的锅）。
+   */
+  function checkRender() {
+    try {
+      var frame = $('editor').querySelector('iframe');
+      var doc = frame && frame.contentDocument;
+      if (!doc) return {noFrame: true};
+      var list = [].slice.call(doc.querySelectorAll('canvas'));
+      var big = list.reduce(function (a, b) {
+        return (b.width * b.height > a.width * a.height) ? b : a;
+      }, {width: 0, height: 0});
+      var out = {canvas: big.width + 'x' + big.height, canvases: list.length};
+      if (big.getContext && big.width) {
+        var ctx = big.getContext('2d');
+        var w = Math.min(600, big.width), h = Math.min(400, big.height);
+        var data = ctx.getImageData(0, 0, w, h).data;
+        var n = 0, dark = 0, nonWhite = 0;
+        for (var i = 0; i < data.length; i += 4) {
+          n++;
+          var r = data[i], g = data[i + 1], b = data[i + 2];
+          if (r < 120 && g < 120 && b < 120) dark++;
+          if (!(r > 245 && g > 245 && b > 245)) nonWhite++;
+        }
+        out.darkPct = +(dark * 100 / n).toFixed(1);
+        out.nonWhitePct = +(nonWhite * 100 / n).toFixed(1);
+      }
+      return out;
+    } catch (e) {
+      return {err: e.message};
+    }
+  }
+
+  /**
    * 标题栏：新版客户端画在它自己的标题栏里，否则（浏览器、旧版客户端）页面顶上自己画一行。
    * @param note 只读说明，可编辑时为空
    */
@@ -126,7 +161,7 @@
         var cfg = res.config;
         cfg.events = {
           onAppReady: function () { ev('appReady'); },
-          onDocumentReady: function () { ev('documentReady'); D.docReady(); },
+          onDocumentReady: function () { ev('documentReady'); D.docReady(checkRender()); },
           onDocumentStateChange: function (e) { ev('stateChange', e && e.data); },
           onError: function (e) { ev('error', e && e.data); },
           onWarning: function (e) { ev('warning', e && e.data); },

@@ -145,11 +145,43 @@
   }
 
   // ------------------------------------------------------------ 登录与接口
+  // 当前可用的 authCode：优先用宿主通过 URL 片段带进来的，过期/没带就问宿主再要
+  var currentAuthCode = hostAuthCode;
+  var currentAuthCodeAt = Date.now();
+
+  /** 找宿主换一个新的 authCode（认证码有效期只有几分钟） */
+  function refreshAuthCode() {
+    if (!canCallHost()) {
+      return Promise.resolve(currentAuthCode);
+    }
+    return Bridge.call('getAuthCode', { appId: 'admin', appType: 2 }, 20000).then(function (res) {
+      if (res && res.code === 0 && res.data) {
+        currentAuthCode = res.data;
+        currentAuthCodeAt = Date.now();
+      }
+      return currentAuthCode;
+    })['catch'](function () { return currentAuthCode; });
+  }
+
+  /**
+   * 拿一个可用的 authCode。
+   * 嵌入上下文（iframe，见 ensureSession）里接口是拿 authCode 头鉴权的，而认证码有效期只有几分钟，
+   * URL 片段上那份经常已经过期，所以这里只认 4 分钟内的，过期就问宿主换新的。
+   */
+  function ensureAuthCode() {
+    if (currentAuthCode && (Date.now() - currentAuthCodeAt) < 4 * 60 * 1000) {
+      return Promise.resolve(currentAuthCode);
+    }
+    return refreshAuthCode();
+  }
+
   var loginPromise = null;
   function login() {
     if (!loginPromise) {
       loginPromise = Bridge.call('getAuthCode', { appId: 'admin', appType: 2 }, 20000).then(function (res) {
         if (!res || res.code !== 0 || !res.data) throw new Error('获取登录凭证失败（' + (res && res.code) + '）');
+        currentAuthCode = res.data;
+        currentAuthCodeAt = Date.now();
         return fetch(new URL('session', DOC_BASE), {
           method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
@@ -172,7 +204,17 @@
    * 刷新失败（比如 authCode 过期）就沿用现有会话，走原来的兜底逻辑。
    */
   var sessionReady = null;
+  /**
+   * 准备鉴权：
+   * - 被 iframe 嵌到别的站点时（我们的 PC 客户端 / 网页里的 iframe），SameSite=Strict 的会话 Cookie
+   *   不会被带上，所以这种上下文直接用 authCode 头调接口，不依赖 Cookie；
+   * - 一方上下文（客户端 WebView、浏览器顶层页 / 弹窗）继续用 /doc/session 换 Cookie 会话，
+   *   同时把 authCode 也带上，两边都可用。
+   */
   function ensureSession() {
+    if (isEmbedded) {
+      return ensureAuthCode();
+    }
     if (!sessionReady) {
       sessionReady = (Bridge.available() ? login() : Promise.resolve(null))
         .catch(function (e) {
@@ -180,14 +222,18 @@
           return null;
         });
     }
-    return sessionReady;
+    return sessionReady.then(function () { return ensureAuthCode(); });
   }
 
   function api(path, body, retried) {
-    return ensureSession().then(function () {
+    return ensureSession().then(function (code) {
+      var headers = { 'Content-Type': 'application/json', 'X-Pan-Web': '1' };
+      if (code) {
+        headers.authCode = code;
+      }
       return fetch(new URL(path, API_BASE), {
         method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Pan-Web': '1' },
+        headers: headers,
         body: JSON.stringify(body || {})
       });
     }).then(function (r) {
@@ -198,7 +244,8 @@
         if (!Bridge.available()) {
           var e = new Error('请在客户端中打开'); e.notInClient = true; throw e;
         }
-        return login().then(function () { return api(path, body, true); });
+        return (isEmbedded ? refreshAuthCode() : login())
+          .then(function () { return api(path, body, true); });
       }
       if (r.code !== 0) throw new Error(r.message || '请求失败');
       return r.data;
@@ -303,11 +350,11 @@
     return optionsPromise;
   }
 
-  /** 编辑器文档就绪：客户端（PC 端独立窗口）据此把「正在加载」收掉 */
-  function docReady() {
-    if (hasDs) {
-      try { Bridge.callSync('docReady', {}); } catch (e) { /* 客户端不支持就算了 */ }
-    }
+  /** 编辑器文档就绪：客户端（PC 端独立窗口）据此把「正在加载」收掉；info 里带上渲染自检结果 */
+  function docReady(info) {
+    if (!canCallHost()) return;
+    // 原生客户端走 dsbridge，网页/iframe 宿主走 postMessage（Bridge.callSync 两边都覆盖）
+    try { Bridge.callSync('docReady', info || {}); } catch (e) { /* 客户端不支持就算了 */ }
   }
 
   window.PanDoc = {
