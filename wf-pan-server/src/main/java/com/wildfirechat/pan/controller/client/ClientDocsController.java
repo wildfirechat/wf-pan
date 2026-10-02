@@ -5,6 +5,7 @@ import com.wildfirechat.pan.dto.Result;
 import com.wildfirechat.pan.dto.request.CreateDocRequest;
 import com.wildfirechat.pan.dto.request.EditorConfigRequest;
 import com.wildfirechat.pan.dto.request.FileIdRequest;
+import com.wildfirechat.pan.dto.request.PreviewPdfRequest;
 import com.wildfirechat.pan.dto.request.ViewUrlRequest;
 import com.wildfirechat.pan.dto.vo.FileVO;
 import com.wildfirechat.pan.dto.vo.RecentDocVO;
@@ -83,16 +84,17 @@ public class ClientDocsController {
     
     /**
      * 只读 PDF 预览（手机端省流量）：把文档转成 PDF 再显示，返回带签名的 PDF 地址。
-     * 手机端打开文档默认走这里，转不了再退回编辑器。
+     * 手机端打开文档默认走这里，转不了再退回编辑器。网盘文件传 fileId，按链接只读传 url(+name)。
      */
     @PostMapping("/preview-pdf")
-    public Result<Map<String, Object>> previewPdf(@Valid @RequestBody FileIdRequest request,
+    public Result<Map<String, Object>> previewPdf(@Valid @RequestBody PreviewPdfRequest request,
                                                   HttpServletRequest httpRequest) {
         String userId = (String) httpRequest.getAttribute(ClientAuthFilter.USER_ID_KEY);
         if (userId == null || userId.isEmpty()) {
             return Result.error(401, "用户未登录");
         }
-        return Result.success(docsService.previewPdf(request.getFileId(), userId, httpRequest));
+        return Result.success(docsService.previewPdf(request.getFileId(), request.getUrl(), request.getName(),
+            userId, httpRequest));
     }
 
     /**

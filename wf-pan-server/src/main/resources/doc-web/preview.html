@@ -51,13 +51,17 @@
   var D = window.PanDoc;
   var params = new URLSearchParams(location.search);
   var fileId = Number(params.get('fileId'));
+  var viewUrl = params.get('url') || '';
+  var viewName = params.get('name') || '';
   var $ = function (id) { return document.getElementById(id); };
 
   function fallbackToEditor(reason) {
     // 转不了就退回编辑器，体验和以前一致
-    var url = 'open?fileId=' + fileId + '&nopreview=1';
+    var url = 'open?nopreview=1';
+    if (fileId) url += '&fileId=' + fileId;
+    if (viewUrl) url += '&url=' + encodeURIComponent(viewUrl);
     if (params.get('platform')) url += '&platform=' + encodeURIComponent(params.get('platform'));
-    if (params.get('name')) url += '&name=' + encodeURIComponent(params.get('name'));
+    if (viewName) url += '&name=' + encodeURIComponent(viewName);
     console.warn('pan doc preview fallback:', reason);
     location.replace(url);
   }
@@ -76,11 +80,11 @@
     btn.addEventListener('click', function () { D.downloadFile(url); });
   }
 
-  if (!fileId) {
+  if (!fileId && !viewUrl) {
     $('status').textContent = '缺少文件参数';
     return;
   }
-  D.api('docs/preview-pdf', { fileId: fileId }).then(function (res) {
+  D.api('docs/preview-pdf', fileId ? { fileId: fileId } : { url: viewUrl, name: viewName }).then(function (res) {
     if (!res || !res.url) {
       fallbackToEditor('no url');
       return;

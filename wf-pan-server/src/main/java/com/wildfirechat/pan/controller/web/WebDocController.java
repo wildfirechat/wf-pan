@@ -70,12 +70,13 @@ public class WebDocController {
 
     /** 输出缓存的预览 PDF；链接由 /api/v1/docs/preview-pdf 签发，自带签名与有效期 */
     @GetMapping("/doc/preview.pdf")
-    public void previewPdf(@RequestParam("f") Long fileId,
-                           @RequestParam("v") int versionNo,
+    public void previewPdf(@RequestParam(value = "f", required = false) Long fileId,
+                           @RequestParam(value = "v", required = false) Integer versionNo,
+                           @RequestParam(value = "u", required = false) String encodedUrl,
                            @RequestParam("e") long expire,
                            @RequestParam("s") String sign,
                            HttpServletResponse response) throws Exception {
-        docsService.servePreviewPdf(fileId, versionNo, expire, sign, response);
+        docsService.servePreviewPdf(fileId, versionNo, encodedUrl, expire, sign, response);
     }
 
     @PostMapping("/doc/session")

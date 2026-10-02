@@ -306,13 +306,19 @@
     if (b) onAction(b.dataset.act);
   });
 
-  // 手机端只读：先走 PDF 预览（编辑器要下十几 MB，PDF 只要几百 KB）。
-  // 转不出来、或者服务端开了手机端编辑，就照常打开编辑器。
-  var mobileReadOnlyPreview = params.get('platform') === 'mobile' && fileId && params.get('nopreview') !== '1';
-  if (mobileReadOnlyPreview) {
+  // 手机端不支持编辑，一律先走 PDF 预览（编辑器要下十几 MB，PDF 只要几百 KB）；
+  // 转不出来（或服务端关了预览开关）再退回编辑器，行为跟以前一致。
+  var isMobileClient = params.get('platform') === 'mobile' || D.isMobile();
+  var wantPreview = isMobileClient && params.get('nopreview') !== '1' && (!!fileId || !!viewUrl);
+  if (wantPreview) {
     D.options().then(function (opt) {
-      if (opt && opt.mobilePdfPreview && !opt.mobileEdit) {
-        var u = 'preview?fileId=' + fileId + '&platform=mobile';
+      if (opt && opt.mobilePdfPreview) {
+        var u = 'preview?platform=mobile';
+        if (fileId) {
+          u += '&fileId=' + fileId;
+        } else {
+          u += '&url=' + encodeURIComponent(viewUrl);
+        }
         if (viewName) u += '&name=' + encodeURIComponent(viewName);
         location.replace(u);
         return;
