@@ -249,6 +249,12 @@ curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worke
 > 安卓 WebView 则完全不能内嵌 PDF。pdf.js 资源（`pdf.min.js` + `pdf.worker.min.js`，约 1.5MB）
 > 放在 `/doc/` 下随页面一起缓存，只在手机端加载。
 
+> **边下边看**：`/doc/preview.pdf` 支持 **HTTP Range**（`Accept-Ranges: bytes`，分段请求返回 206，
+> 越界返回 416）。pdf.js 先取一小段就能把第一页画出来，剩下的在后台继续下，不用等整份 PDF 下完。
+> 两个前提别破坏：①nginx 不能对 `application/pdf` 开 gzip——pdf.js 一旦看到 `Content-Encoding`
+> 不是 `identity` 就会放弃分段、退化成整包下载（当前 `gzip_types` 里没有 pdf，保持这样）；
+> ②`/doc/` 反代不要清掉 `Range`/`Accept-Ranges` 头。自检脚本会验（见 9.4）。
+
 > 桌面端（PC）仍然是加载 ONLYOFFICE 编辑器：首屏要把 sdkjs（gzip 4.7MB）和字体引擎在本地解析，
 > 实测**首次打开约 5~15 秒**（第二次因为缓存会快些）。客户端的文档窗口会显示「正在加载…」，
 > 加载失败才提示错误 + 重试；这段等待是编辑器自身的初始化时间，不是网络问题。

@@ -51,6 +51,38 @@ if curl -s "$PAN/doc/app.js" | grep -q ensureSession; then pass "文档页会话
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$PAN/doc/preview.pdf?f=1&v=1&e=1&s=x")
 if [ "$CODE" != "200" ]; then pass "preview.pdf 对无效链接返回 $CODE（页面会退回编辑器）"; else fail "preview.pdf 对无效链接仍返回 200"; fi
 
+# 4.1 preview.pdf 支持 HTTP Range：手机端 pdf.js 才能边下边看（不然要等整份 PDF 下完）
+PCONF=${PCONF:-/root/pan/config/application.properties}
+PDIR=$(grep -E '^docs\.preview_dir=' "$PCONF" 2>/dev/null | cut -d= -f2)
+PDIR=${PDIR:-/root/pan/preview}
+CACHEFILE=$(ls "$PDIR"/f*-v*.pdf 2>/dev/null | head -1)
+if [ -f "$PCONF" ] && [ -n "$CACHEFILE" ]; then
+  FID=$(basename "$CACHEFILE" | sed -E 's/^f([0-9]+)-v([0-9]+)\.pdf$/\1/')
+  VER=$(basename "$CACHEFILE" | sed -E 's/^f([0-9]+)-v([0-9]+)\.pdf$/\2/')
+  QS=$(python3 - "$PCONF" "$FID" "$VER" <<'PY' 2>/dev/null
+import sys, hmac, hashlib, base64, time
+cfg = dict(l.split("=", 1) for l in open(sys.argv[1]) if "=" in l and not l.startswith("#"))
+secret = cfg["pan.sign_secret"].strip().encode()
+exp = int(time.time()) + 300
+sig = base64.urlsafe_b64encode(hmac.new(secret, f"of|{sys.argv[2]}|{sys.argv[3]}|{exp}".encode(), hashlib.sha256).digest()).rstrip(b"=").decode()
+print(f"e={exp}&s={sig}")
+PY
+)
+  if [ -n "$QS" ]; then
+    RH=$(curl -s -D- -o /dev/null -H 'Range: bytes=0-99' -H 'Accept-Encoding: gzip' \
+         "$PAN/doc/preview.pdf?f=$FID&v=$VER&$QS" | tr -d '\r')
+    if ! echo "$RH" | grep -q '206'; then
+      fail "preview.pdf 不支持 Range（手机端要等整份 PDF 下完才显示）"
+    elif echo "$RH" | grep -qi '^content-encoding:'; then
+      fail "preview.pdf 被压缩了（pdf.js 会放弃 Range）"
+    else
+      pass "preview.pdf 支持 HTTP Range 206（手机端可边下边看）"
+    fi
+  fi
+else
+  echo "  · 跳过 Range 检查（没有本地预览缓存或读不到 $PCONF）"
+fi
+
 # 5. ONLYOFFICE 容器
 if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q "^$CONTAINER$"; then
   curl -sf -o /dev/null "http://127.0.0.1:8089/healthcheck" && pass "ONLYOFFICE 健康检查通过" || fail "ONLYOFFICE 健康检查失败"

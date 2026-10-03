@@ -75,8 +75,9 @@ public class WebDocController {
                            @RequestParam(value = "u", required = false) String encodedUrl,
                            @RequestParam("e") long expire,
                            @RequestParam("s") String sign,
+                           HttpServletRequest request,
                            HttpServletResponse response) throws Exception {
-        docsService.servePreviewPdf(fileId, versionNo, encodedUrl, expire, sign, response);
+        docsService.servePreviewPdf(fileId, versionNo, encodedUrl, expire, sign, request, response);
     }
 
     @PostMapping("/doc/session")

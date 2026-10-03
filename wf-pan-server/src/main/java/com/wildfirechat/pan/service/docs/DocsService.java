@@ -42,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -742,9 +743,10 @@ public class DocsService {
     /**
      * 输出缓存的预览 PDF（链接由 previewPdf 签发，带签名与有效期）。
      * 这里是浏览器直接取的地址，校验失败要回明确的 HTTP 状态码，页面才能据此退回编辑器。
+     * 支持 HTTP Range：手机端的 pdf.js / 系统阅读器可以边下边看，不用等整个 PDF 下完。
      */
     public void servePreviewPdf(Long fileId, Integer versionNo, String encodedUrl, long expire, String sign,
-                                HttpServletResponse response) throws IOException {
+                                HttpServletRequest request, HttpServletResponse response) throws IOException {
         if (!docsConfig.isEnabled()) {
             writePreviewError(response, 404, "在线文档未启用");
             return;
@@ -785,11 +787,84 @@ public class DocsService {
         response.setContentType("application/pdf");
         response.setHeader("Content-Disposition", "inline; filename=\"preview.pdf\"");
         response.setHeader("Cache-Control", "private, max-age=" + Math.max(60, docsConfig.getDownloadTtlSeconds()));
-        response.setContentLengthLong(Files.size(pdf));
-        try (OutputStream os = response.getOutputStream()) {
-            Files.copy(pdf, os);
+        long total = Files.size(pdf);
+        response.setHeader("Accept-Ranges", "bytes");
+        long[] range = parseRange(request == null ? null : request.getHeader("Range"), total);
+        if (range != null && range.length == 0) {
+            // 请求的区间不合法：按 RFC 回 416，并告知文件总长度
+            response.setStatus(HttpServletResponse.SC_REQUESTED_RANGE_NOT_SATISFIABLE);
+            response.setHeader("Content-Range", "bytes */" + total);
+            return;
+        }
+        if (range != null) {
+            long start = range[0];
+            long end = range[1];
+            response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
+            response.setHeader("Content-Range", "bytes " + start + "-" + end + "/" + total);
+            response.setContentLengthLong(end - start + 1);
+            try (RandomAccessFile raf = new RandomAccessFile(pdf.toFile(), "r")) {
+                raf.seek(start);
+                OutputStream os = response.getOutputStream();
+                byte[] buf = new byte[16 * 1024];
+                long remain = end - start + 1;
+                while (remain > 0) {
+                    int n = raf.read(buf, 0, (int) Math.min(buf.length, remain));
+                    if (n <= 0) {
+                        break;
+                    }
+                    os.write(buf, 0, n);
+                    remain -= n;
+                }
+            }
+        } else {
+            response.setContentLengthLong(total);
+            try (OutputStream os = response.getOutputStream()) {
+                Files.copy(pdf, os);
+            }
         }
         touchPreview(pdf);
+    }
+
+    /**
+     * 解析单段 HTTP Range（bytes=a-b / bytes=a- / bytes=-n）。
+     * 返回 null 表示不用分段（返回整个文件）；返回空数组表示区间无法满足（回 416）。
+     */
+    private static long[] parseRange(String header, long total) {
+        if (header == null || total <= 0) {
+            return null;
+        }
+        String h = header.trim();
+        if (!h.regionMatches(true, 0, "bytes=", 0, 6) || h.indexOf(',') >= 0) {
+            return null;
+        }
+        String spec = h.substring(6).trim();
+        int dash = spec.indexOf('-');
+        if (dash < 0) {
+            return new long[0];
+        }
+        try {
+            String from = spec.substring(0, dash).trim();
+            String to = spec.substring(dash + 1).trim();
+            long start;
+            long end;
+            if (from.isEmpty()) {
+                long suffix = Long.parseLong(to);
+                if (suffix <= 0) {
+                    return new long[0];
+                }
+                start = Math.max(0, total - suffix);
+                end = total - 1;
+            } else {
+                start = Long.parseLong(from);
+                end = to.isEmpty() ? total - 1 : Math.min(Long.parseLong(to), total - 1);
+            }
+            if (start < 0 || start > end || start >= total) {
+                return new long[0];
+            }
+            return new long[]{start, end};
+        } catch (NumberFormatException e) {
+            return new long[0];
+        }
     }
 
     private void writePreviewError(HttpServletResponse response, int status, String message) throws IOException {
