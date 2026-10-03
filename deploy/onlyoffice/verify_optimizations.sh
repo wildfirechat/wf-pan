@@ -47,6 +47,16 @@ done
 if curl -s "$PAN/doc/preview" | grep -q preview-frame; then pass "PDF 预览页已部署"; else fail "PDF 预览页缺失"; fi
 if curl -s "$PAN/doc/open" | grep -q isMobileClient; then pass "手机端一律走预览的逻辑已部署"; else fail "open.html 还是旧版（手机端按链接打开仍会加载编辑器）"; fi
 if curl -s "$PAN/doc/app.js" | grep -q ensureSession; then pass "文档页会话刷新已部署（避免旧会话导致无权限）"; else fail "doc-web/app.js 缺会话刷新"; fi
+if curl -s "$PAN/doc/preview.html" | grep -q disableStream; then
+  pass "预览页按 Range 分段取数（pdf.js 不再整包流式下载）"
+else
+  fail "预览页用的是 pdf.js 默认加载（会先整包下载，第一页要等大半份 PDF）"
+fi
+if curl -s "$PAN/doc/preview.html" | grep -q pdf-slot; then
+  pass "预览页按需渲染（滚到哪页画哪页）"
+else
+  fail "预览页会一次性渲染所有页（大文档吃内存、多下流量）"
+fi
 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$PAN/doc/preview.pdf?f=1&v=1&e=1&s=x")
 if [ "$CODE" != "200" ]; then pass "preview.pdf 对无效链接返回 $CODE（页面会退回编辑器）"; else fail "preview.pdf 对无效链接仍返回 200"; fi

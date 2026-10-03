@@ -34,6 +34,9 @@
     display: block; margin: 0 auto 10px; background: #fff;
     box-shadow: 0 1px 6px rgba(0,0,0,.45);
   }
+  /* 还没画出来的页先占位：滚动到跟前再取数据、再画 */
+  .pdf-slot { display: block; margin: 0 auto 10px; background: #525659; }
+  .pdf-slot .pdf-page { margin: 0; }
   .preview-status { flex: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 14px; text-align: center; padding: 24px; }
 </style>
 </head>
@@ -106,48 +109,131 @@
     frame.hidden = false;
   }
 
-  /** 手机：pdf.js 逐页画到 canvas */
+  /** 手机：pdf.js 逐页画到 canvas——只画要看的页，走 Range 边下边看，不整包下载 */
   function showPdfJs(title, pdfUrl) {
     showBar(title, pdfUrl);
     $('status').hidden = false;
-    $('status').textContent = '正在渲染…';
+    $('status').textContent = '正在打开…';
     loadScript(new URL('pdf.min.js', D.DOC_BASE).href).then(function () {
       var pdfjsLib = window.pdfjsLib;
       pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdf.worker.min.js', D.DOC_BASE).href;
-      return pdfjsLib.getDocument({url: pdfUrl, withCredentials: true}).promise;
+      // disableStream / disableAutoFetch：让 pdf.js 用 HTTP Range 只取要用的分段。
+      // 默认参数下它会先发一个「整包」请求再顺序读，第一页常常要等大半份 PDF 下完才出来。
+      return pdfjsLib.getDocument({
+        url: pdfUrl,
+        withCredentials: true,
+        disableStream: true,
+        disableAutoFetch: true
+      });
+    }).then(function (task) {
+      task.onProgress = function (p) {
+        if (p && p.total > 0) {
+          $('status').textContent = '正在打开… ' + Math.min(99, Math.round(p.loaded / p.total * 100)) + '%';
+        }
+      };
+      return task.promise;
     }).then(function (pdf) {
-      var box = $('pages');
-      box.hidden = false;
-      $('status').hidden = true;
-      var dpr = Math.min(window.devicePixelRatio || 1, 2);
-      var chain = Promise.resolve();
-      var availWidth = function () { return Math.max(200, box.clientWidth - 16); };
-      for (var n = 1; n <= pdf.numPages; n++) {
-        (function (n) {
-          chain = chain.then(function () {
-            return pdf.getPage(n).then(function (page) {
-              var base = page.getViewport({scale: 1});
-              var scale = availWidth() / base.width;
-              var viewport = page.getViewport({scale: scale * dpr});
-              var canvas = document.createElement('canvas');
-              canvas.className = 'pdf-page';
-              canvas.width = Math.floor(viewport.width);
-              canvas.height = Math.floor(viewport.height);
-              canvas.style.width = Math.floor(viewport.width / dpr) + 'px';
-              canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
-              box.appendChild(canvas);
-              return page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise
-                .then(function () { page.cleanup(); });
-            });
-          });
-        })(n);
-      }
-      return chain;
+      renderPages(pdf);
     })['catch'](function (e) {
       // pdf.js 出问题就退回编辑器（PC/网页上编辑器是好的）
       fallbackToEditor('pdf.js: ' + (e && e.message));
     });
   }
+
+  /**
+   * 先只画第 1 页，其余页滚到跟前再取、再画。
+   * 大文档（几十上百页）不用一次性把整份 PDF 下完、也不用一次性画几百个 canvas。
+   */
+  function renderPages(pdf) {
+    var box = $('pages');
+    box.hidden = false;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var availWidth = function () { return Math.max(200, box.clientWidth - 16); };
+    var slots = [];
+    var queue = [];
+    var busy = false;
+    var shown = false;
+
+    for (var n = 1; n <= pdf.numPages; n++) {
+      var slot = document.createElement('div');
+      slot.className = 'pdf-slot';
+      slot.setAttribute('data-page', String(n));
+      slot.style.width = availWidth() + 'px';
+      slot.style.height = Math.round(availWidth() * 1.414) + 'px';   // 先按 A4 比例占位，画好后用实际高度
+      box.appendChild(slot);
+      slots.push(slot);
+    }
+
+    function renderOne(n) {
+      var slot = slots[n - 1];
+      if (!slot || slot.getAttribute('data-done')) {
+        return Promise.resolve();
+      }
+      slot.setAttribute('data-done', '1');
+      return pdf.getPage(n).then(function (page) {
+        var base = page.getViewport({scale: 1});
+        var width = availWidth();
+        var viewport = page.getViewport({scale: width / base.width * dpr});
+        var canvas = document.createElement('canvas');
+        canvas.className = 'pdf-page';
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        canvas.style.width = width + 'px';
+        canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
+        slot.style.height = '';
+        slot.appendChild(canvas);
+        if (!shown) {   // 第 1 页一出现就把「正在打开」收掉（渲染在 canvas 上继续）
+          shown = true;
+          $('status').hidden = true;
+        }
+        return page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise
+          .then(function () { page.cleanup(); });
+      })['catch'](function (e) {
+        slot.removeAttribute('data-done');   // 失败的下次滚到还能再试
+        throw e;
+      });
+    }
+
+    function pump() {
+      if (busy || !queue.length) {
+        return;
+      }
+      busy = true;
+      var n = queue.shift();
+      renderOne(n)['catch'](function (e) {
+        console.warn('预览第 ' + n + ' 页失败', e && e.message);
+      }).then(function () {
+        busy = false;
+        pump();
+      });
+    }
+
+    function want(n) {
+      if (queue.indexOf(n) < 0) {
+        queue.push(n);
+      }
+      pump();
+    }
+
+    if (typeof IntersectionObserver === 'function') {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (!en.isIntersecting) {
+            return;
+          }
+          want(Number(en.target.getAttribute('data-page')));
+          io.unobserve(en.target);
+        });
+      }, {root: box, rootMargin: '150% 0px 150% 0px'});
+      slots.forEach(function (s) { io.observe(s); });
+    } else {
+      // 老 WebView 没有 IntersectionObserver：退化成顺序全画
+      slots.forEach(function (s, i) { want(i + 1); });
+    }
+  }
+
+  // 暴露出来便于自测/排查（页面本身不依赖）
+  window.PanPreview = {showPdfJs: showPdfJs, renderPages: renderPages};
 
   function loadScript(src) {
     return new Promise(function (resolve, reject) {

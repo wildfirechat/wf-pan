@@ -250,7 +250,13 @@ curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worke
 > 放在 `/doc/` 下随页面一起缓存，只在手机端加载。
 
 > **边下边看**：`/doc/preview.pdf` 支持 **HTTP Range**（`Accept-Ranges: bytes`，分段请求返回 206，
-> 越界返回 416）。pdf.js 先取一小段就能把第一页画出来，剩下的在后台继续下，不用等整份 PDF 下完。
+> 越界返回 416），手机端页面再用 pdf.js 的 `disableStream + disableAutoFetch` **只取要用的分段**，
+> 并且**滚到哪页画哪页**（`IntersectionObserver` + 占位块）。
+>
+> **别改回 pdf.js 默认参数**：默认参数下 pdf.js 会先发一个「整包」请求再顺序读，实测一篇
+> 6.3MB / 23 页的文档，第一页要等 **3.3~5.1MB** 下完才出现，而且会一次画 23 个 canvas
+> （内存大、小内存手机容易崩）；现在的参数第一页只要 **约 1.5MB**、只画 1 个 canvas，滚动时再取后面的页。
+>
 > 两个前提别破坏：①nginx 不能对 `application/pdf` 开 gzip——pdf.js 一旦看到 `Content-Encoding`
 > 不是 `identity` 就会放弃分段、退化成整包下载（当前 `gzip_types` 里没有 pdf，保持这样）；
 > ②`/doc/` 反代不要清掉 `Range`/`Accept-Ranges` 头。自检脚本会验（见 9.4）。
