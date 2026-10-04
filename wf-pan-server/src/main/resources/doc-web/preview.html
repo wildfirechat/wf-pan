@@ -29,7 +29,10 @@
   .pdf-pages {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
     padding: 8px 0 24px; background: #525659;
+    /* 双指缩放自己实现（见下面的 setZoom）：浏览器自身的手势关掉，单指拖动保留 */
+    touch-action: pan-x pan-y;
   }
+  #pagesInner { min-width: 100%; }
   .pdf-page {
     display: block; margin: 0 auto 10px; background: #fff;
     box-shadow: 0 1px 6px rgba(0,0,0,.45);
@@ -47,11 +50,12 @@
       <span class="title" id="title"></span>
       <span class="tag" id="tag">只读预览</span>
     </div>
+    <button id="zoomReset" hidden>100%</button>
     <button id="openExternal" hidden>用其他应用打开</button>
   </div>
   <div class="preview-status" id="status">正在生成预览…</div>
   <iframe class="preview-frame" id="frame" hidden></iframe>
-  <div class="pdf-pages" id="pages" hidden></div>
+  <div class="pdf-pages" id="pages" hidden><div id="pagesInner"></div></div>
 </div>
 <script>
 /**
@@ -73,6 +77,11 @@
   var viewUrl = params.get('url') || '';
   var viewName = params.get('name') || '';
   var $ = function (id) { return document.getElementById(id); };
+  var box = $('pages');          // 滚动容器（不被缩放）
+  var inner = $('pagesInner');   // 真正被缩放的内容容器
+  var slots = [];                // 每页一个占位块，renderPages 里填充
+  var pdfRef = null;             // 当前 pdf.js 文档，放大后重画要用
+  function availWidth() { return Math.max(200, box.clientWidth - 16); }
 
   function fallbackToEditor(reason) {
     // 转不了（或渲染不出来）就退回编辑器，体验和以前一致
@@ -157,11 +166,11 @@
    * 大文档（几十上百页）不用一次性把整份 PDF 下完、也不用一次性画几百个 canvas。
    */
   function renderPages(pdf) {
-    var box = $('pages');
+    pdfRef = pdf;
     box.hidden = false;
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var availWidth = function () { return Math.max(200, box.clientWidth - 16); };
-    var slots = [];
+    // 新文档：先回到 1 倍
+    setZoom(1);
+    slots = [];
     var queue = [];
     var busy = false;
     var shown = false;
@@ -172,7 +181,7 @@
       slot.setAttribute('data-page', String(n));
       slot.style.width = availWidth() + 'px';
       slot.style.height = Math.round(availWidth() * 1.414) + 'px';   // 先按 A4 比例占位，画好后用实际高度
-      box.appendChild(slot);
+      inner.appendChild(slot);
       slots.push(slot);
     }
 
@@ -185,6 +194,7 @@
       return pdf.getPage(n).then(function (page) {
         var base = page.getViewport({scale: 1});
         var width = availWidth();
+        var dpr = crispDpr();   // 按"当前"倍率画：放大后新滚到的页也不糊
         var viewport = page.getViewport({scale: width / base.width * dpr});
         var canvas = document.createElement('canvas');
         canvas.className = 'pdf-page';
@@ -246,7 +256,137 @@
   }
 
   // 暴露出来便于自测/排查（页面本身不依赖）
-  window.PanPreview = {showPdfJs: showPdfJs, renderPages: renderPages};
+  window.PanPreview = {showPdfJs: showPdfJs, renderPages: renderPages, setZoom: setZoom};
+
+  /* ---------------------------------------------------------------- 双指缩放
+   * 手机上一页 A4 缩到屏幕宽常常看不清小字，这里让用户双指放大、单指拖动看。
+   *
+   * 做法：给内容容器加 CSS `zoom`（布局真的变大，横竖都能用原生滚动拖动，单指拖动
+   * 不用自己实现）；手势停下后再把看得见的页按新倍率重画一遍，canvas 放大后不至于糊。
+   */
+  var MIN_ZOOM = 1, MAX_ZOOM = 4;
+  var viewZoom = 1;
+  var pinch = null;
+  var crispTimer = null;
+
+  /** canvas 的分辨率倍数：1 倍时沿用原来的 2（手机内存有限），放大后最多提到 4 */
+  function crispDpr() {
+    return Math.min(Math.min(window.devicePixelRatio || 1, 2) * viewZoom, 4);
+  }
+
+  function updateZoomChip() {
+    var chip = $('zoomReset');
+    if (!chip) return;
+    chip.hidden = viewZoom === 1;
+    chip.textContent = Math.round(viewZoom * 100) + '%';
+  }
+
+  /** 设定倍率。[mx],[my] 是手势中心（相对滚动容器的坐标），缩放时保持它下面的内容不动 */
+  function setZoom(z, mx, my) {
+    var next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+    if (mx == null) { mx = box.clientWidth / 2; }
+    if (my == null) { my = box.clientHeight / 2; }
+    var cx = (box.scrollLeft + mx) / viewZoom;
+    var cy = (box.scrollTop + my) / viewZoom;
+    viewZoom = next;
+    inner.style.zoom = viewZoom === 1 ? '' : String(viewZoom);
+    box.scrollLeft = cx * viewZoom - mx;
+    box.scrollTop = cy * viewZoom - my;
+    updateZoomChip();
+    scheduleCrisp();
+  }
+
+  /** 手势停下后（防抖）把看得见的页重画一遍 */
+  function scheduleCrisp() {
+    if (crispTimer) { clearTimeout(crispTimer); }
+    crispTimer = setTimeout(redrawVisible, 260);
+  }
+
+  function redrawVisible() {
+    if (!pdfRef || viewZoom === 1) { return; }
+    var boxRect = box.getBoundingClientRect();
+    slots.forEach(function (slot) {
+      var r = slot.getBoundingClientRect();
+      if (r.bottom < boxRect.top - 200 || r.top > boxRect.bottom + 200) { return; }
+      redrawSlot(Number(slot.getAttribute('data-page')));
+    });
+  }
+
+  /** 按当前倍率重画一页：先画好新 canvas 再替换，避免替换瞬间高度塌陷、画面跳 */
+  function redrawSlot(n) {
+    var slot = slots[n - 1];
+    if (!slot || !slot.getAttribute('data-done') || slot.getAttribute('data-redrawing')) { return; }
+    slot.setAttribute('data-redrawing', '1');
+    pdfRef.getPage(n).then(function (page) {
+      var base = page.getViewport({scale: 1});
+      var width = availWidth();
+      var dpr = crispDpr();
+      var viewport = page.getViewport({scale: width / base.width * dpr});
+      var canvas = document.createElement('canvas');
+      canvas.className = 'pdf-page';
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = width + 'px';
+      canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
+      return page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise
+        .then(function () {
+          var old = slot.querySelector('canvas');
+          if (old) { slot.replaceChild(canvas, old); } else { slot.appendChild(canvas); }
+          page.cleanup();
+          slot.removeAttribute('data-redrawing');
+        });
+    })['catch'](function () { slot.removeAttribute('data-redrawing'); });
+  }
+
+  function touchDist(t) {
+    var dx = t[0].clientX - t[1].clientX;
+    var dy = t[0].clientY - t[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  box.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) {
+      pinch = {dist: touchDist(e.touches), zoom: viewZoom};
+      e.preventDefault();   // 双指交给缩放，别让页面跟着滚
+    }
+  }, {passive: false});
+
+  box.addEventListener('touchmove', function (e) {
+    if (e.touches.length !== 2 || !pinch) { return; }
+    e.preventDefault();
+    var rect = box.getBoundingClientRect();
+    var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+    var my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+    setZoom(pinch.zoom * touchDist(e.touches) / pinch.dist, mx, my);
+  }, {passive: false});
+
+  box.addEventListener('touchend', function (e) {
+    if (e.touches.length < 2) { pinch = null; }
+    if (e.touches.length === 0) { scheduleCrisp(); }
+  });
+
+  // 双击：1 倍与 2 倍之间切换（看小字时最常用）
+  var lastTap = 0, lastTapX = 0, lastTapY = 0;
+  box.addEventListener('touchend', function (e) {
+    if (e.touches.length !== 0 || e.changedTouches.length !== 1) { return; }
+    var t = e.changedTouches[0];
+    var now = Date.now();
+    if (now - lastTap < 300 &&
+        Math.abs(t.clientX - lastTapX) < 40 && Math.abs(t.clientY - lastTapY) < 40) {
+      var rect = box.getBoundingClientRect();
+      setZoom(viewZoom > 1 ? 1 : 2, t.clientX - rect.left, t.clientY - rect.top);
+      lastTap = 0;
+      return;
+    }
+    lastTap = now;
+    lastTapX = t.clientX;
+    lastTapY = t.clientY;
+  });
+
+  var zoomChip = $('zoomReset');
+  if (zoomChip) {
+    zoomChip.addEventListener('click', function () { setZoom(1); });
+  }
 
   function loadScript(src) {
     return new Promise(function (resolve, reject) {

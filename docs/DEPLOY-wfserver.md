@@ -248,6 +248,8 @@ curl -s https://pan.wildfirechat.net/docs/<版本>/document_editor_service_worke
 > **手机端用 pdf.js 逐页画到 canvas**——iOS 的 WKWebView 把 PDF 放进 iframe **只显示第一页**，
 > 安卓 WebView 则完全不能内嵌 PDF。pdf.js 资源（`pdf.min.js` + `pdf.worker.min.js`，约 1.5MB）
 > 放在 `/doc/` 下随页面一起缓存，只在手机端加载。
+> 手机端支持**双指缩放**（1~4 倍，围绕手势中心缩放）与**双击**在 1 倍/2 倍间切换；
+> 放大后用单指拖动浏览（走原生滚动）。放大后可见页会按新倍率重画，不会糊。
 
 > **边下边看**：`/doc/preview.pdf` 支持 **HTTP Range**（`Accept-Ranges: bytes`，分段请求返回 206，
 > 越界返回 416），手机端页面再用 pdf.js 的 `disableStream + disableAutoFetch` **只取要用的分段**，
