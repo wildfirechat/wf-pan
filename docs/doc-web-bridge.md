@@ -13,6 +13,11 @@ WebView 使用 **dsbridge** 协议（`window._dsbridge`，UA 里带 `WF-DSBridge
 - `openUrl(url)`
 - `chooseContacts({})` / `chooseGroup({})`
 - `toast(msg)` / `close()`
+- `docReady(info)`（同步、单向，页面 → 宿主）：**文档真正可以看了**才发一次，宿主据此收起
+  「正在加载…」。编辑器页在 ONLYOFFICE `onDocumentReady` 时发（首屏 5~15 秒）；
+  只读 PDF 预览页在 iframe 取到 PDF / pdf.js 画出第 1 页时发
+  （`info = {source:'preview', stage:'pdfjs'|'frame', pages?, reason?}`）。
+  宿主不实现也没关系 —— 页面用 try/catch 兜着，只是少一个"收起加载态"的信号。
 - `_dsb.hasNativeMethod({name, type:'all'})`（同步，用于能力探测）
 
 页面拿到 authCode 后 `POST /doc/session` 换取 `PAN_WS` Cookie，之后所有接口带 Cookie + `X-Pan-Web: 1`。

@@ -105,8 +105,20 @@
   function showFrame(title, pdfUrl) {
     showBar(title, pdfUrl);
     var frame = $('frame');
+    // 浏览器内置 PDF 查看器画好没有我们拿不到事件，取到 PDF（iframe load）就算就绪：
+    // 宿主（客户端）据此收起「正在加载」，不然遮罩会一直盖着。
+    frame.onload = function () { ready('frame'); };
     frame.src = pdfUrl;
     frame.hidden = false;
+  }
+
+  /** 通知宿主：预览页已经能看了（客户端据此收起加载遮罩，见 docs/doc-web-bridge.md） */
+  function ready(source, extra) {
+    var info = { source: 'preview', stage: source };
+    if (extra) {
+      for (var k in extra) { if (Object.prototype.hasOwnProperty.call(extra, k)) info[k] = extra[k]; }
+    }
+    try { D.docReady(info); } catch (e) { /* 客户端不支持就算了 */ }
   }
 
   /** 手机：pdf.js 逐页画到 canvas——只画要看的页，走 Range 边下边看，不整包下载 */
@@ -185,6 +197,7 @@
         if (!shown) {   // 第 1 页一出现就把「正在打开」收掉（渲染在 canvas 上继续）
           shown = true;
           $('status').hidden = true;
+          ready('pdfjs', { pages: pdf.numPages });
         }
         return page.render({canvasContext: canvas.getContext('2d'), viewport: viewport}).promise
           .then(function () { page.cleanup(); });
@@ -247,6 +260,7 @@
 
   if (!fileId && !viewUrl) {
     $('status').textContent = '缺少文件参数';
+    ready('error', { reason: 'missing file param' });
     return;
   }
 
