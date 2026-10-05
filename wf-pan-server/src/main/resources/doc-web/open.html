@@ -92,6 +92,28 @@
   }
 
   /**
+   * PDF 用触控板 / 鼠标滚轮滚不动（ONLYOFFICE 9.x）的补丁。
+   *
+   * PDF 查看器把滚动挂在 #editor_sdk 的 onmousewheel（旧式 mousewheel 事件）上，界面层又在同一个元素上
+   * addEventListener('wheel') 处理 Ctrl+滚轮缩放。WebKit / Chromium 的规则是元素上有 wheel 监听就不再给它
+   * 补发 mousewheel ⇒ 查看器永远收不到滚轮，页面纹丝不动。Word 等其它编辑器挂在里层 #id_main 上，不受影响。
+   * 这里在同一元素上补一个 wheel 监听转给它的 onmousewheel；浏览器不会再补发，不会滚两次。
+   * Firefox 没有 onmousewheel（查看器走 DOMMouseScroll），不用补。
+   */
+  function patchPdfWheel() {
+    try {
+      var frame = $('editor').querySelector('iframe');
+      var win = frame && frame.contentWindow;
+      var sdk = win && win.document.getElementById('editor_sdk');
+      if (!sdk || sdk.wfWheelPatched || !('onmousewheel' in win.HTMLElement.prototype)) return;
+      sdk.wfWheelPatched = true;
+      sdk.addEventListener('wheel', function (e) {
+        if (typeof sdk.onmousewheel === 'function') sdk.onmousewheel(e);
+      }, {passive: false});
+    } catch (e) { /* 编辑器不同源时够不着，保持原样 */ }
+  }
+
+  /**
    * 标题栏：新版客户端画在它自己的标题栏里，否则（浏览器、旧版客户端）页面顶上自己画一行。
    * @param note 只读说明，可编辑时为空
    */
@@ -161,7 +183,11 @@
         var cfg = res.config;
         cfg.events = {
           onAppReady: function () { ev('appReady'); },
-          onDocumentReady: function () { ev('documentReady'); D.docReady(checkRender()); },
+          onDocumentReady: function () {
+            ev('documentReady');
+            if (cfg.documentType === 'pdf') patchPdfWheel();
+            D.docReady(checkRender());
+          },
           onDocumentStateChange: function (e) { ev('stateChange', e && e.data); },
           onError: function (e) { ev('error', e && e.data); },
           onWarning: function (e) { ev('warning', e && e.data); },
