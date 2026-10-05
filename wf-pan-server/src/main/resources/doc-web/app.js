@@ -331,10 +331,11 @@
 
   /**
    * 下载文件。客户端里不能交给 openUrl：它在内置网页里打开地址，文件显示不出来，是个白屏页；
-   * 新版客户端的 downloadFile 交给系统（桌面是默认浏览器）。旧版客户端只能照旧 openUrl。
+   * 新版客户端的 downloadFile 自己下（桌面弹「另存为」、手机下到沙盒后弹系统「存储/分享」面板）。
+   * [name] 可选：带上文件名，客户端的「另存为」/分享面板就有个好名字。
    */
-  function downloadFile(url) {
-    if (Bridge.has('downloadFile')) Bridge.callSync('downloadFile', { url: url });
+  function downloadFile(url, name) {
+    if (Bridge.has('downloadFile')) Bridge.callSync('downloadFile', { url: url, name: name || '' });
     else openLink(url);
   }
 

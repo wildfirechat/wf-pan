@@ -104,10 +104,38 @@
     $('title').textContent = title;
     $('bar').hidden = false;
     $('status').hidden = true;
-    // 留一个出口：用户想用系统应用看、或某些 WebView 画不出来时
+    // 留一个出口：用户想用系统应用看、或某些 WebView 画不出来时。
+    // 交给其它应用的是**原文**（docx/pptx/…），不是这一页预览用的转换后 PDF ——
+    // 用户要的是"拿别的应用打开这个文件"，PDF 只是网页内预览的产物。
     var btn = $('openExternal');
     btn.hidden = false;
-    btn.addEventListener('click', function () { D.downloadFile(pdfUrl); });
+    btn.addEventListener('click', function () {
+      originalUrl().then(function (u) {
+        if (!u) {
+          D.toast('取原文地址失败');
+          return;
+        }
+        // 服务端在 pan.public_path 为空时给的是相对地址，这里补成绝对地址再交给客户端，
+        // 否则各端拿到没有 scheme 的地址会静默失败
+        D.downloadFile(new URL(u, location.href).href, title);
+      })['catch'](function (e) {
+        D.toast('取原文地址失败');
+        console.warn('pan doc original url failed:', e);
+      });
+    });
+  }
+
+  /**
+   * 原文地址：网盘文件取它的签名下载地址；按链接预览就是当时传进来的来源地址本身
+   * （聊天文件消息、外部链接）。
+   */
+  function originalUrl() {
+    if (fileId) {
+      return D.api('files/url', { fileId: fileId }).then(function (u) {
+        return (u && u.storageUrl) || '';
+      });
+    }
+    return Promise.resolve(viewUrl || '');
   }
 
   /** 桌面：交给内置 PDF 查看器 */

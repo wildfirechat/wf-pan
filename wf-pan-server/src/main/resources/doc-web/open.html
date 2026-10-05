@@ -232,7 +232,7 @@
   }
 
   function download() {
-    D.api('files/url', { fileId: fileId }).then(function (u) { D.downloadFile(u.storageUrl); }).catch(function (e) { D.toast(e.message); });
+    D.api('files/url', { fileId: fileId }).then(function (u) { D.downloadFile(u.storageUrl, info && info.fileName); }).catch(function (e) { D.toast(e.message); });
   }
 
   function convert() {
@@ -348,7 +348,7 @@
       if (!r) return;
       var no = Number(r.dataset.no);
       if (e.target.hasAttribute('data-dl')) {
-        D.api('files/url', { fileId: fileId, versionNo: no }).then(function (u) { D.downloadFile(u.storageUrl); })
+        D.api('files/url', { fileId: fileId, versionNo: no }).then(function (u) { D.downloadFile(u.storageUrl, info && info.fileName); })
           .catch(function (err) { D.toast(err.message); });
       } else if (e.target.hasAttribute('data-restore')) {
         if (!confirm('恢复到 v' + no + '？当前内容会保留为历史版本。正在编辑的人需要重新打开。')) return;
