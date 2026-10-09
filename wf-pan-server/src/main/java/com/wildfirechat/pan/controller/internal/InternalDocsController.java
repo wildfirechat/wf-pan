@@ -4,6 +4,7 @@ import com.wildfirechat.pan.config.ProxiedRequestValve;
 import com.wildfirechat.pan.service.ObjectStoreService;
 import com.wildfirechat.pan.service.SignService;
 import com.wildfirechat.pan.service.docs.DocsService;
+import com.wildfirechat.pan.service.docs.DocxCompat;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -71,7 +72,7 @@ public class InternalDocsController {
         }
         response.setContentType("application/octet-stream");
         try (InputStream in = objectStoreService.open(storageUrl, null, null)) {
-            in.transferTo(response.getOutputStream());
+            DocxCompat.transfer(in, response.getOutputStream());
         }
     }
 
@@ -108,7 +109,7 @@ public class InternalDocsController {
         }
         response.setContentType("application/octet-stream");
         try (InputStream in = docsService.openReadOnlySource(url)) {
-            in.transferTo(response.getOutputStream());
+            DocxCompat.transfer(in, response.getOutputStream());
         } catch (Exception e) {
             log.warn("ONLYOFFICE 按链接取文件失败: {}", e.getMessage());
             response.sendError(HttpServletResponse.SC_NOT_FOUND);

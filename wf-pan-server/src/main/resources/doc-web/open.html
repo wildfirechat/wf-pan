@@ -114,6 +114,41 @@
   }
 
   /**
+   * 打印交给客户端，用系统打印面板选打印机。
+   *
+   * 编辑器的「打印」先在服务端转成 PDF，再由页面自己打：Chromium 里塞进隐藏 iframe 调 print()；
+   * WebKit（macOS 客户端的 WKWebView）里直接当附件下载 —— 客户端只能存进「下载」再用「预览」打开，
+   * 选不了打印机；WKWebView 也不实现 window.print()，页面自己打不出来。
+   * 客户端有 printFile 时：让编辑器一律把转好的 PDF 地址交回来（asc_onPrintUrl，服务端给 inline 地址），
+   * 转给客户端弹系统打印面板（打印机、份数、页码）。编辑器打印设置里的页码、纸张、方向在转 PDF 时已经生效。
+   */
+  function patchPrint() {
+    try {
+      if (!D.Bridge.has('printFile')) return;
+      var frame = $('editor').querySelector('iframe');
+      var win = frame && frame.contentWindow;
+      var api = win && win.Asc && win.Asc.editor;
+      if (!api || api.wfPrintPatched || typeof api.asc_Print !== 'function' || typeof api.sendEvent !== 'function') return;
+      api.wfPrintPatched = true;
+      var ascPrint = api.asc_Print, ascSend = api.sendEvent;
+      api.asc_Print = function (options) {
+        if (!options && win.Asc.asc_CDownloadOptions) options = new win.Asc.asc_CDownloadOptions();
+        // 结果走 asc_onPrintUrl 交回来，而不是按浏览器类型决定要不要直接下载
+        if (options) options.isDownloadEvent = true;
+        return ascPrint.call(this, options);
+      };
+      api.sendEvent = function (name, url) {
+        if (name !== 'asc_onPrintUrl' || !url) return ascSend.apply(this, arguments);
+        D.Bridge.callSync('printFile', {
+          url: new URL(url, win.location.href).href,
+          name: (info && info.fileName || '').replace(/\.[^.]*$/, '') + '.pdf'
+        });
+        return true;
+      };
+    } catch (e) { /* 编辑器不同源时够不着，保持原样 */ }
+  }
+
+  /**
    * 标题栏：新版客户端画在它自己的标题栏里，否则（浏览器、旧版客户端）页面顶上自己画一行。
    * @param note 只读说明，可编辑时为空
    */
@@ -186,6 +221,7 @@
           onDocumentReady: function () {
             ev('documentReady');
             if (cfg.documentType === 'pdf') patchPdfWheel();
+            patchPrint();
             D.docReady(checkRender());
           },
           onDocumentStateChange: function (e) { ev('stateChange', e && e.data); },
